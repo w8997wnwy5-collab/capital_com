@@ -1286,13 +1286,33 @@ function schedaPiano(ep){
     '<div><div class="l">Se va</div><div class="v pos">' + fmt(p.guadagnoPiano, 0) + '</div><div class="s">meta\' al primo, meta\' al secondo</div></div>' +
     '<div><div class="l">Margine</div><div class="v">' + fmt(p.margine, 0) + '</div><div class="s">leva ' + M.fmtLeva(p.leva) + ' · valore ' + fmt(p.valore, 0) + '</div></div></div>';
 
+  /* Le istruzioni per il biglietto d'ordine di Capital.com, con i numeri
+     scritti come li scrive Capital.com: virgola per i decimali, niente
+     separatore delle migliaia. La divisione in due posizioni (meta' al primo
+     obiettivo la incassa Capital.com da sola) si propone solo se tutte e due
+     le meta' stanno sopra la taglia minima: con budget piccoli non ci stanno,
+     e allora una posizione sola con take profit al primo obiettivo. */
+  var cc = function(x){ return x.toFixed(M.decimaliPer(x)).replace('.', ','); };
+  var qq = function(x){ return x.toFixed(dec).replace('.', ','); };
+  var meta1 = M.giuAlPasso(p.dim / 2, p.passo), meta2 = +(p.dim - meta1).toFixed(6);
+  var dividi = meta1 > 0 && meta2 > 0 && (!p.dimMin || (meta1 >= p.dimMin - 1e-9 && meta2 >= p.dimMin - 1e-9));
+  var dove = p.tipo === 'mercato' ? '' : ' come <b>ordine in attesa</b> a <b class="num">' + cc(p.entrata) + '</b> (' +
+    (p.tipo === 'limite' ? (p.dir > 0 ? 'piu\' in basso di adesso: entri solo se ci torna' : 'piu\' in alto di adesso: entri solo se ci torna')
+                         : (p.dir > 0 ? 'piu\' in alto di adesso: entri solo se rompe' : 'piu\' in basso di adesso: entri solo se sfonda')) + ')';
+  var impostazioni = function(tp){
+    return 'Con l\'<b>ingranaggio</b> accanto al campo imposta' + (p.tipo === 'mercato' ? '' : ' il prezzo dell\'ordine <b class="num">' + cc(p.entrata) + '</b>,') +
+      ' <b>stop loss</b> <b class="num">' + cc(p.stop) + '</b> e <b>take profit</b> <b class="num">' + cc(tp) + '</b>.';
+  };
   h += '<div class="card"><div class="h2" style="margin:0 0 8px">Su Capital.com</div><ol class="elenco">' +
-    '<li>' + esc(nomeDi(ep)) + ' › <b>' + (p.dir > 0 ? 'Compra' : 'Vendi') + '</b>' + (p.tipo === 'mercato' ? '' : ' › ordine in attesa a <b class="num">' + prezzo(p.entrata) + '</b>') + '.</li>' +
-    '<li>Due posizioni da <b class="num">' + fmt(M.giuAlPasso(p.dim / 2, p.passo), dec) + '</b> e <b class="num">' + fmt(p.dim - M.giuAlPasso(p.dim / 2, p.passo), dec) + '</b>: ' +
-      'la prima con take profit a <b class="num">' + prezzo(p.tp1) + '</b>, la seconda a <b class="num">' + prezzo(p.tp2) + '</b>. Cosi\' l\'incasso a meta\' lo fa Capital.com da solo.</li>' +
-    '<li>Stop loss a <b class="num">' + prezzo(p.stop) + '</b> su tutte e due. Leva ' + M.fmtLeva(p.leva) +
-      (p.leva < p.levaMax ? ' (puoi salire a ' + M.fmtLeva(p.levaMax) + ': cambia solo il margine, non il rischio)' : '') + '.</li>' +
-    '<li>Premi <b>Sono entrato</b> qui sotto' + (S.modo === 'vero' ? ' — o non fare niente: la posizione la vedo comparire da solo.' : '.') + '</li></ol></div>';
+    '<li>Apri <b>' + esc(nomeDi(ep)) + '</b> e tocca <b>' + (p.dir > 0 ? 'Compra' : 'Vendi') + '</b>' + dove + '.</li>' +
+    (dividi
+      ? '<li>Nel campo <b>Azioni</b> scrivi <b class="num">' + qq(meta1) + '</b>. ' + impostazioni(p.tp1) + ' Conferma.</li>' +
+        '<li>Rifai lo stesso con <b class="num">' + qq(meta2) + '</b> azioni e take profit <b class="num">' + cc(p.tp2) + '</b>. Cosi\' la prima meta\' la incassa Capital.com da sola.</li>'
+      : '<li>Nel campo <b>Azioni</b> scrivi <b class="num">' + qq(p.dim) + '</b>: una posizione sola, perche\' dividerla in due farebbe pezzi sotto la taglia minima di Capital.com' +
+        (p.dimMin ? ' (' + qq(p.dimMin) + ')' : '') + '. ' + impostazioni(p.tp1) + ' Conferma.</li>') +
+    '<li>Controllo: il <b>requisito di margine</b> deve venire in tutto circa <b class="num">' + fmt(p.margine, p.margine < 20 ? 1 : 0) + ' ' + valutaConto() + '</b> (leva ' + M.fmtLeva(p.leva) + '). ' +
+      'Se Capital.com ne chiede circa ' + fmt(p.valore, p.valore < 20 ? 1 : 0) + ', sul tuo conto la leva e\' 1:1: il rischio non cambia, blocchi solo piu\' margine.</li>' +
+    '<li>' + (S.modo === 'vero' ? 'Quando l\'ordine scatta la posizione la vedo comparire da sola. Se vuoi, premi <b>Sono entrato</b>.' : 'Premi <b>Sono entrato</b> qui sotto.') + '</li></ol></div>';
 
   /* le probabilita', dal backtest */
   var cal = S.calib && an.grado ? S.calib.perGrado[an.grado] : null;
