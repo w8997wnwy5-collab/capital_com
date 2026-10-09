@@ -174,6 +174,14 @@ mandato. A mercato chiuso tace.
 - **«Capital.com rifiuta le credenziali»**: quasi sempre è la password. Ci va
   quella della *chiave API*, non quella con cui entri nel conto. Poi: la chiave
   è del conto giusto? Con `CAPITAL_DEMO = 1` il ponte parla con il server demo.
+- **«Credenziali giuste, ma sul server demo non hai un conto attivo»** (`error.null.accountId`):
+  Capital.com ti fa entrare ma non trova un conto su quel server. Apri il conto
+  demo su Capital.com, oppure aggiungi la variabile `CAPITAL_DEMO` = `0` (tipo
+  Text) per collegare il conto reale. Il ponte resta in sola lettura.
+- **Entri su Capital.com con Apple o Google**: in `CAPITAL_LOGIN` va l'email
+  che trovi in *Impostazioni › Profilo* su Capital.com (con "Nascondi la mia
+  email" di Apple è un indirizzo `…@privaterelay.appleid.com`). La password è
+  sempre quella della chiave API.
 - **«Il ponte non risponde»**: l'indirizzo deve essere quello del Worker
   (`https://…workers.dev`), senza niente dopo. Aprilo nel browser: deve dire
   *il ponte è acceso*.

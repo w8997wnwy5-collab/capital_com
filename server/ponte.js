@@ -140,7 +140,7 @@ async function apriSessione(env) {
   if (!r.ok) {
     let dettaglio = '';
     try { dettaglio = (await r.json()).errorCode || ''; } catch (e) { /* niente */ }
-    throw new ErroreCapital(r.status === 401 || r.status === 400 ? 401 : 502, frase(dettaglio, r.status));
+    throw new ErroreCapital(r.status === 401 || r.status === 400 ? 401 : 502, frase(dettaglio, r.status, env));
   }
   const cst = r.headers.get('CST'), token = r.headers.get('X-SECURITY-TOKEN');
   if (!cst || !token) throw new ErroreCapital(502, 'Capital.com ha aperto la sessione ma non ha mandato i gettoni.');
@@ -159,8 +159,15 @@ class ErroreCapital extends Error {
 }
 
 /* I codici di errore di Capital.com, detti in italiano. */
-function frase(codice, stato) {
+function frase(codice, stato, env) {
   const c = String(codice || '');
+  /* Le credenziali vanno bene, ma su questo server non c'e' un conto: capita
+     a chi non ha mai aperto il conto demo, perche' il ponte parte dal demo. */
+  if (/null\.accountId/.test(c)) {
+    return env && eDemo(env)
+      ? 'Credenziali giuste, ma sul server demo di Capital.com non hai un conto attivo (' + c + '). Apri il conto demo su Capital.com, oppure metti la variabile CAPITAL_DEMO = 0 nel Worker per usare il conto reale (il ponte e\' comunque in sola lettura).'
+      : 'Credenziali giuste, ma il conto reale non risulta attivo per l\'API (' + c + '). Controlla che il conto sia verificato, oppure torna al demo con CAPITAL_DEMO = 1.';
+  }
   if (/invalid\.details|invalid\.password|invalid\.api\.key|error\.null\.api\.key/.test(c)) {
     return 'Capital.com rifiuta le credenziali (' + c + '). Controlla email, chiave API e la PASSWORD DELLA CHIAVE (non quella del conto), e che la chiave sia del conto giusto: demo o reale.';
   }
@@ -185,7 +192,7 @@ async function chiediCapital(env, percorso, query, tentativo = 0) {
   const testo = await r.text();
   let dati = null;
   try { dati = testo ? JSON.parse(testo) : {}; } catch (e) { dati = null; }
-  if (!r.ok) throw new ErroreCapital(r.status === 404 ? 404 : 502, frase(dati && dati.errorCode, r.status));
+  if (!r.ok) throw new ErroreCapital(r.status === 404 ? 404 : 502, frase(dati && dati.errorCode, r.status, env));
   if (dati == null) throw new ErroreCapital(502, 'Capital.com ha risposto qualcosa che non e\' JSON.');
   return dati;
 }

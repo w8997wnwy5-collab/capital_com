@@ -26,7 +26,7 @@ prova('server/worker.js e\' cucito dall\'ultimo motore e dall\'ultimo ponte', fs
 
 /* ── Capital.com e Telegram finti ── */
 const chiamate = [];
-let sessioniAperte = 0, rifiutaProssima = false;
+let sessioniAperte = 0, rifiutaProssima = false, senzaConto = false;
 const DEMO = 'https://demo-api-capital.backend-capital.com';
 globalThis.fetch = async (url, init = {}) => {
   url = String(url);
@@ -47,6 +47,7 @@ globalThis.fetch = async (url, init = {}) => {
     return new Response('{}', { status: 200, headers: { CST: 'cst' + sessioniAperte, 'X-SECURITY-TOKEN': 'tok' + sessioniAperte } });
   }
   if (rifiutaProssima) { rifiutaProssima = false; return new Response(JSON.stringify({ errorCode: 'error.invalid.session.token' }), { status: 401 }); }
+  if (senzaConto) return new Response(JSON.stringify({ errorCode: 'error.null.accountId' }), { status: 401 });
   if (!init.headers || !init.headers.CST || !init.headers['X-SECURITY-TOKEN']) return new Response('{}', { status: 401 });
   const q = Object.fromEntries(u.searchParams.entries());
   const r = E.risposta(percorso, q, Date.UTC(2026, 9, 7, 16, 0));
@@ -127,6 +128,11 @@ const sbagliata = { ...ENV, CAPITAL_PASSWORD: 'no' };
 rifiutaProssima = true;
 r = await chiedi('/api/cap/accounts', { env: sbagliata });
 prova('credenziali sbagliate: errore chiaro', r.stato === 401 && /PASSWORD DELLA CHIAVE/.test(r.d.errore), r.d.errore);
+senzaConto = true;
+r = await chiedi('/api/stato');
+senzaConto = false;
+prova('credenziali giuste ma nessun conto demo: lo dice, e dice come uscirne',
+      r.stato === 200 && r.d.ok === false && /conto demo/.test(r.d.problema) && /CAPITAL_DEMO = 0/.test(r.d.problema), r.d.problema);
 prova('a Capital.com arrivano solo letture (e l\'apertura della sessione)',
       chiamate.filter(c => c.url.startsWith(DEMO)).every(c => c.metodo === 'GET' || (c.metodo === 'POST' && c.url.endsWith('/session'))));
 

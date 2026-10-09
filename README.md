@@ -156,7 +156,7 @@ Istruzioni passo per passo: [`server/COME-SI-ACCENDE.md`](server/COME-SI-ACCENDE
 
 ```bash
 node tools/test_motore.js      # 55 controlli sul motore
-node tools/test_ponte.mjs      # 31 controlli sul ponte, con un Capital.com finto
+node tools/test_ponte.mjs      # 32 controlli sul ponte, con un Capital.com finto
 node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 ```
 
