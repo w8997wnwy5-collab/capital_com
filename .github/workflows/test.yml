@@ -1,0 +1,24 @@
+name: Test
+
+# Il motore e il ponte, a ogni modifica. E il controllo che server/worker.js
+# sia stato ricucito: incollare su Cloudflare un ponte con il motore vecchio
+# vorrebbe dire avvisi diversi da quello che dice l'app.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Il motore
+        run: node tools/test_motore.js
+      - name: Il ponte
+        run: node tools/test_ponte.mjs
+      - name: server/worker.js e' aggiornato
+        run: node tools/cuci_worker.js --verifica

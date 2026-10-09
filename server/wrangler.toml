@@ -1,0 +1,36 @@
+# Mirino — il ponte verso Capital.com.
+#
+# Serve solo per la strada B (dal terminale). Dalla strada A, il pannello di
+# Cloudflare, questo file non si usa: si incolla worker.js e basta.
+#
+# worker.js e' CUCITO da tools/cuci_worker.js (motore.js + ponte.js): non si
+# modifica a mano. Si cambiano gli altri due e si rilancia lo script.
+
+name = "mirino"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# Ogni minuto il ponte guarda le posizioni aperte e, se il consiglio cambia,
+# scrive su Telegram. Senza posizioni aperte il giro costa una domanda sola.
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+# Gli indirizzi da cui l'app puo' parlare con il ponte. Un asterisco qui
+# vorrebbe dire che qualunque sito puo' usare il codice di chi passa.
+ORIGINI = "https://w8997wnwy5-collab.github.io"
+# "1" = conto demo, "0" = conto reale. Si parte dal demo, apposta.
+CAPITAL_DEMO = "1"
+
+# La memoria lunga: come leggere ogni posizione e l'ultimo avviso mandato.
+[[kv_namespaces]]
+binding = "MEMORIA"
+id = "METTI_QUI_L_ID_DEL_DEPOSITO_MEMORIA"
+
+# I segreti NON si scrivono qui: questo file finisce su GitHub, che e' pubblico.
+#   npx wrangler secret put CAPITAL_API_KEY    # la chiave API di Capital.com
+#   npx wrangler secret put CAPITAL_LOGIN      # l'email con cui entri su Capital.com
+#   npx wrangler secret put CAPITAL_PASSWORD   # la password DELLA CHIAVE API, non quella del conto
+#   npx wrangler secret put CHIAVE             # il codice d'accesso che metterai nell'app
+#   npx wrangler secret put TELEGRAM_TOKEN     # facoltativo: il bot che ti scrive
+#   npx wrangler secret put TELEGRAM_CHAT      # facoltativo: a chi scrive

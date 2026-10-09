@@ -1,0 +1,1904 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mirino">
+<meta name="description" content="Leva alta, mira stretta. Legge i mercati di Capital.com, ti dice dove e quando entrare, quanto mettere e quando uscire.">
+<meta name="theme-color" content="#F4F6FA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#10131B" media="(prefers-color-scheme: dark)">
+<title>Mirino</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#F4F6FA; --card:#FFFFFF; --card2:#F8F9FC; --ink:#141A2B; --mute:#677089;
+  --line:#E0E5EE; --line2:#ECEFF5; --accent:#2F55D4; --accent-soft:#E8EDFC;
+  --ok:#1F7A4D; --ok-soft:#E5F2EA; --warn:#C4453A; --warn-soft:#FCEFED;
+  --amber:#A96F1F; --amber-soft:#FBF2E4;
+  --hero-bg:#141A2B; --hero-ink:#FFFFFF;
+  /* Lungo e corto sono i due poli di una scala DIVERGENTE, non due colori a
+     caso: devono leggersi come opposti anche per chi non distingue il rosso
+     dal verde. Passati al validatore contro il fondo chiaro: separazione per
+     deuteranopia 9.2, 27.3 a vista normale, contrasto sopra 3:1. E non
+     viaggiano mai da soli: accanto c'e' sempre scritto LUNGO o CORTO. */
+  --lungo:#178A57; --corto:#D14310; --neutro:#9AA3B5;
+  --r-s:12px; --r-m:16px; --r-l:20px;
+  --molla:cubic-bezier(.22,.9,.28,1.2);
+  --ombra:0 1px 2px rgba(20,26,43,.05), 0 10px 26px -14px rgba(20,26,43,.18);
+  --sys:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;
+  --mono:ui-monospace,'SF Mono','Menlo','Roboto Mono',monospace;
+  --safeb:env(safe-area-inset-bottom,0px); --safet:env(safe-area-inset-top,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    /* gli stessi due poli, ristretti sul fondo scuro: validati contro di lui */
+    --lungo:#2AA96F; --corto:#E05F2C; --neutro:#6E7890;
+    --bg:#10131B; --card:#1A1F2B; --card2:#212736; --ink:#E9EDF5; --mute:#98A1B8;
+    --line:#2A3142; --line2:#222838; --accent:#7C9BFF; --accent-soft:#1E2742;
+    --ok:#5FBF88; --ok-soft:#16281F; --warn:#F08A80; --warn-soft:#2E1D1B;
+    --amber:#E0A65A; --amber-soft:#2C2418;
+    --hero-bg:#222A3D; --hero-ink:#E9EDF5;
+    --ombra:0 1px 2px rgba(0,0,0,.35), 0 10px 26px -14px rgba(0,0,0,.6);
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;background:var(--bg);}
+body{font-family:var(--sys);color:var(--ink);-webkit-font-smoothing:antialiased;overscroll-behavior-y:none;}
+button,input,select{font-family:inherit;font-size:16px;color:inherit;}
+h1,h2,h3,h4{margin:0;}
+a{color:var(--accent);}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+
+#app{padding-bottom:calc(86px + var(--safeb));}
+.top{position:sticky;top:0;z-index:20;background:var(--bg);
+  background:color-mix(in srgb,var(--bg) 80%,transparent);
+  backdrop-filter:saturate(200%) blur(22px);-webkit-backdrop-filter:saturate(200%) blur(22px);
+  border-bottom:.5px solid var(--line);padding:calc(var(--safet) + 14px) 18px 12px;
+  display:flex;align-items:flex-end;gap:10px;}
+.top .ttl{flex:1;min-width:0;}
+.top h1{font-size:30px;font-weight:700;letter-spacing:-.9px;line-height:1.05;display:flex;align-items:center;gap:9px;}
+.top .sub{font-size:13px;color:var(--mute);letter-spacing:-.1px;margin-top:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.modo{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;padding:4px 7px;border-radius:7px;
+  background:var(--amber-soft);color:var(--amber);font-family:var(--mono);}
+.modo.vero{background:var(--ok-soft);color:var(--ok);}
+.modo.demo{background:var(--accent-soft);color:var(--accent);}
+.top .ico{flex:none;border:.5px solid var(--line);background:var(--card);border-radius:50%;
+  width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--mute);box-shadow:var(--ombra);transition:transform .2s var(--molla),opacity .15s;}
+.top .ico:active{transform:scale(.9);opacity:.7;}
+.top .ico svg{width:18px;height:18px;}
+.top .ico.gira svg{animation:gira 1s linear infinite;}
+@keyframes gira{to{transform:rotate(360deg)}}
+.wrap{padding:16px 16px 26px;max-width:680px;margin:0 auto;}
+
+.tabs{position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;background:var(--card);
+  background:color-mix(in srgb,var(--card) 94%,transparent);
+  backdrop-filter:saturate(180%) blur(14px);-webkit-backdrop-filter:saturate(180%) blur(14px);
+  border-top:1px solid var(--line);padding-bottom:var(--safeb);}
+.tab{flex:1;border:0;background:none;padding:9px 0 8px;display:flex;flex-direction:column;position:relative;
+  align-items:center;gap:3px;cursor:pointer;color:var(--mute);transition:transform .2s var(--molla);}
+.tab svg{width:21px;height:21px;transition:transform .25s var(--molla);}
+.tab span{font-size:10px;font-weight:500;white-space:nowrap;}
+.tab:active{transform:scale(.88);}
+.tab.on{color:var(--accent);}
+.tab.on svg{transform:scale(1.06);}
+.tab .pallino{position:absolute;top:6px;left:calc(50% + 8px);min-width:16px;height:16px;border-radius:8px;padding:0 4px;
+  background:var(--warn);color:#fff;font-size:10px;font-weight:700;line-height:16px;font-family:var(--mono);}
+
+.card{background:var(--card);border:.5px solid var(--line);border-radius:var(--r-l);
+  padding:17px;margin-bottom:12px;box-shadow:var(--ombra);}
+.card.tap{cursor:pointer;transition:transform .2s var(--molla);}
+.card.tap:active{transform:scale(.985);}
+.card.piatta{box-shadow:none;background:var(--card2);}
+.h2{font-size:12px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--mute);
+  margin:28px 0 11px;display:flex;align-items:baseline;gap:8px;padding:0 3px;}
+.h2:first-child{margin-top:0;}
+.h2 .r{margin-left:auto;font-family:var(--mono);font-size:11px;letter-spacing:.2px;text-transform:none;}
+.lede{font-size:14px;line-height:1.5;color:var(--mute);margin:0 0 13px;padding:0 3px;letter-spacing:-.1px;}
+.lede b{color:var(--ink);}
+.piccolo{font-size:12px;color:var(--mute);line-height:1.45;}
+.muto{color:var(--mute);}
+
+.kpi{display:flex;gap:9px;margin-bottom:12px;}
+.kpi>div{flex:1;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 11px;min-width:0;}
+.kpi .l{font-family:var(--mono);font-size:9px;letter-spacing:.7px;text-transform:uppercase;color:var(--mute);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kpi .v{white-space:nowrap;font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:18px;font-weight:600;letter-spacing:-.6px;margin-top:4px;
+  overflow:hidden;text-overflow:ellipsis;}
+.kpi .s{font-size:10.5px;color:var(--mute);margin-top:2px;line-height:1.3;}
+.pos{color:var(--ok);} .neg{color:var(--warn);}
+
+.hero{background:var(--hero-bg);color:var(--hero-ink);border-radius:var(--r-l);padding:18px;margin-bottom:12px;position:relative;overflow:hidden;}
+.hero .l{font-family:var(--mono);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;opacity:.62;}
+.hero .v{font-size:25px;font-weight:700;letter-spacing:-.7px;margin:6px 0 6px;line-height:1.15;}
+.hero .s{font-size:13px;line-height:1.5;opacity:.86;}
+.hero .riga{display:flex;gap:16px;margin-top:14px;flex-wrap:wrap;}
+.hero .riga div{font-family:var(--mono);font-size:12px;opacity:.9;}
+.hero .riga b{display:block;font-size:17px;letter-spacing:-.4px;margin-top:2px;}
+.hero .mirino{position:absolute;right:-26px;top:-26px;width:130px;height:130px;opacity:.10;}
+
+/* pillole di direzione: colore E parola, mai solo colore */
+.dir{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.6px;
+  text-transform:uppercase;padding:3px 7px;border-radius:7px;color:#fff;white-space:nowrap;}
+.dir.l{background:var(--lungo);} .dir.c{background:var(--corto);} .dir.n{background:var(--neutro);}
+.dir svg{width:10px;height:10px;}
+.grado{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;font-family:var(--mono);
+  font-weight:700;font-size:12px;border:1.5px solid currentColor;}
+.grado.A{color:var(--accent);background:var(--accent-soft);} .grado.B{color:var(--ink);} .grado.C{color:var(--mute);border-style:dashed;}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:5px 9px;border-radius:9px;
+  background:var(--card2);border:1px solid var(--line);white-space:nowrap;}
+.chip.acc{background:var(--accent-soft);border-color:transparent;color:var(--accent);}
+.chip.amb{background:var(--amber-soft);border-color:transparent;color:var(--amber);}
+.chip.ok{background:var(--ok-soft);border-color:transparent;color:var(--ok);}
+.chip.ko{background:var(--warn-soft);border-color:transparent;color:var(--warn);}
+
+/* riga del radar */
+.mk{display:flex;flex-direction:column;gap:9px;background:var(--card);border:1px solid var(--line);border-radius:16px;
+  padding:13px 14px;margin-bottom:9px;cursor:pointer;transition:transform .2s var(--molla);}
+.mk:active{transform:scale(.985);}
+.mk .su{display:flex;align-items:center;gap:10px;}
+.mk .nm{flex:1;min-width:0;}
+.mk .nm b{display:block;font-size:15.5px;font-weight:650;letter-spacing:-.25px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mk .nm span{font-family:var(--mono);font-size:11px;color:var(--mute);}
+.mk .px{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;}
+.mk .px b{display:block;font-size:14.5px;font-weight:600;}
+.mk .px span{font-size:11px;}
+.mk .giu{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.mk .giu .dx{margin-left:auto;}
+.spark{width:84px;height:30px;flex:none;}
+.mini{display:flex;flex-wrap:wrap;gap:7px;}
+.mini .chip{cursor:pointer;}
+
+/* barra del punteggio: parte dal centro, va dalla parte della direzione */
+.barra{position:relative;height:8px;border-radius:5px;background:var(--line2);overflow:hidden;flex:1;min-width:70px;}
+.barra::after{content:'';position:absolute;left:50%;top:-2px;bottom:-2px;width:1.5px;background:var(--mute);opacity:.5;}
+.barra i{position:absolute;top:0;bottom:0;border-radius:5px;}
+.barra i.l{background:var(--lungo);left:50%;} .barra i.c{background:var(--corto);right:50%;}
+.punti{font-family:var(--mono);font-size:12.5px;font-weight:700;min-width:34px;text-align:right;}
+
+/* tabelle */
+.tab-d{width:100%;border-collapse:collapse;font-size:13px;}
+.tab-d th{font-family:var(--mono);font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--mute);font-weight:600;
+  text-align:right;padding:6px 6px;border-bottom:1px solid var(--line);}
+.tab-d th:first-child,.tab-d td:first-child{text-align:left;}
+.tab-d td{padding:9px 6px;border-bottom:1px solid var(--line2);text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;}
+.tab-d tr:last-child td{border-bottom:0;}
+.tab-d td.t{font-family:var(--sys);}
+.liv{display:grid;grid-template-columns:auto 1fr auto auto;gap:0 12px;align-items:center;font-size:14px;}
+.liv>div{padding:10px 0;border-bottom:1px solid var(--line2);}
+.liv>div.ult{border-bottom:0;}
+.liv .n{font-weight:600;display:flex;align-items:center;gap:8px;}
+.liv .n i{width:9px;height:9px;border-radius:3px;display:inline-block;}
+.liv .d{font-size:12px;color:var(--mute);}
+.liv .p,.liv .m{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;}
+.liv .p{font-weight:600;}
+
+/* controlli */
+.btn{border:0;border-radius:13px;padding:13px 16px;font-weight:600;cursor:pointer;background:var(--card2);color:var(--ink);
+  border:1px solid var(--line);transition:transform .2s var(--molla),opacity .15s;width:100%;}
+.btn:active{transform:scale(.97);opacity:.85;}
+.btn.acc{background:var(--accent);color:#fff;border-color:transparent;}
+.btn.ok{background:var(--ok);color:#fff;border-color:transparent;}
+.btn.ko{background:var(--warn);color:#fff;border-color:transparent;}
+.btn.picc{width:auto;padding:9px 12px;font-size:14px;border-radius:11px;}
+.btn[disabled]{opacity:.45;pointer-events:none;}
+.fila{display:flex;gap:8px;flex-wrap:wrap;}
+.fila>.btn{flex:1;min-width:120px;}
+.seg{display:flex;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px;}
+.seg button{flex:1;border:0;background:none;padding:9px 6px;border-radius:9px;font-size:14px;font-weight:600;color:var(--mute);cursor:pointer;}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12);}
+.campo{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;}
+.campo label{font-size:12px;font-weight:600;color:var(--mute);letter-spacing:.2px;}
+.campo input,.campo select{border:1px solid var(--line);background:var(--card2);border-radius:12px;padding:12px 13px;width:100%;
+  font-size:16px;outline:none;}
+.campo input:focus,.campo select:focus{border-color:var(--accent);}
+.budget{display:flex;align-items:baseline;gap:8px;border-bottom:2px solid var(--line);padding:4px 2px 8px;margin:6px 0 14px;}
+.budget:focus-within{border-color:var(--accent);}
+.budget input{flex:1;min-width:0;border:0;background:none;outline:none;font-family:var(--mono);font-size:40px;font-weight:600;letter-spacing:-1.5px;padding:0;}
+.budget span{font-family:var(--mono);font-size:18px;color:var(--mute);font-weight:600;}
+
+.nota{font-size:13px;line-height:1.5;padding:11px 13px;border-radius:12px;background:var(--card2);border:1px solid var(--line);margin:10px 0;}
+.nota.warn{background:var(--warn-soft);border-color:transparent;color:var(--warn);}
+.nota.amb{background:var(--amber-soft);border-color:transparent;color:var(--amber);}
+.nota.acc{background:var(--accent-soft);border-color:transparent;color:var(--accent);}
+.nota b{font-weight:700;}
+.elenco{margin:8px 0 0;padding:0 0 0 18px;font-size:13.5px;line-height:1.55;}
+.elenco li{margin-bottom:3px;}
+.vuoto{text-align:center;padding:26px 10px;color:var(--mute);font-size:14px;line-height:1.5;}
+.vuoto b{display:block;color:var(--ink);font-size:16px;margin-bottom:6px;}
+
+/* il piano */
+.ordine{font-size:24px;font-weight:700;letter-spacing:-.6px;line-height:1.2;}
+.ordine .q{font-family:var(--mono);}
+.parti{display:flex;flex-direction:column;gap:9px;}
+.parte{display:grid;grid-template-columns:96px 1fr 38px;gap:10px;align-items:center;font-size:13px;}
+.parte .nome{font-weight:600;}
+.parte .perche{grid-column:1 / -1;font-size:12px;color:var(--mute);margin-top:-5px;line-height:1.4;}
+
+/* il verdetto su una posizione */
+.verdetto{border-radius:14px;padding:13px 14px;margin:10px 0;}
+.verdetto .t{font-size:20px;font-weight:800;letter-spacing:-.4px;text-transform:uppercase;display:flex;align-items:center;gap:8px;}
+.verdetto .f{font-size:14px;line-height:1.45;margin-top:4px;}
+.verdetto.rosso{background:var(--warn);color:#fff;}
+.verdetto.verde{background:var(--ok);color:#fff;}
+.verdetto.blu{background:var(--accent);color:#fff;}
+.verdetto.ambra{background:var(--amber-soft);color:var(--amber);}
+.verdetto.neutro{background:var(--card2);border:1px solid var(--line);}
+.pos-testa{display:flex;align-items:center;gap:10px;}
+.pos-testa .nm{flex:1;min-width:0;}
+.pos-testa .nm b{font-size:17px;letter-spacing:-.3px;}
+.pos-testa .nm div{font-size:12px;color:var(--mute);margin-top:2px;}
+.cifre{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0;}
+.cifre div{background:var(--card2);border-radius:12px;padding:9px 10px;min-width:0;}
+.cifre .l{font-family:var(--mono);font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:var(--mute);}
+.cifre .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:16px;font-weight:650;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+/* grafici */
+.graf{width:100%;display:block;touch-action:pan-y;}
+.graf text{font-family:var(--mono);font-size:10px;fill:var(--mute);}
+.graf .asse{stroke:var(--line);stroke-width:1;}
+.graf .linea{fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;}
+.graf .centro{fill:none;stroke:var(--accent);stroke-width:2;stroke-dasharray:4 4;}
+.graf .b90{fill:var(--accent);opacity:.10;} .graf .b68{fill:var(--accent);opacity:.18;}
+.graf .lv{stroke-width:1.5;stroke-dasharray:5 4;}
+.graf .lv.e{stroke:var(--mute);} .graf .lv.s{stroke:var(--warn);} .graf .lv.t{stroke:var(--ok);}
+.graf .croce{stroke:var(--mute);stroke-width:1;opacity:0;}
+.graf .punto{fill:var(--card);stroke:var(--ink);stroke-width:2;opacity:0;}
+.graf.attivo .croce,.graf.attivo .punto{opacity:1;}
+.curva{fill:none;stroke:var(--accent);stroke-width:2;}
+.zero{stroke:var(--mute);stroke-width:1;stroke-dasharray:3 3;}
+.etichette{display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;color:var(--mute);margin-top:8px;}
+.etichette span{display:inline-flex;align-items:center;gap:5px;}
+.etichette i{width:14px;height:0;border-top:2px dashed;display:inline-block;}
+#suggerimento{position:fixed;z-index:60;pointer-events:none;background:var(--hero-bg);color:var(--hero-ink);font-family:var(--mono);
+  font-size:11.5px;padding:6px 9px;border-radius:9px;opacity:0;transition:opacity .1s;white-space:nowrap;box-shadow:var(--ombra);}
+
+/* fogli che salgono dal basso */
+.velo{position:fixed;inset:0;z-index:50;background:rgba(10,14,24,.45);display:flex;align-items:flex-end;justify-content:center;
+  animation:appari .18s ease;}
+@keyframes appari{from{opacity:0}to{opacity:1}}
+.foglio{background:var(--bg);width:100%;max-width:560px;border-radius:22px 22px 0 0;padding:18px 18px calc(18px + var(--safeb));
+  max-height:92vh;overflow:auto;animation:sali .28s var(--molla);}
+@keyframes sali{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+.foglio h3{font-size:20px;letter-spacing:-.4px;margin-bottom:4px;}
+.maniglia{width:38px;height:5px;border-radius:3px;background:var(--line);margin:-6px auto 12px;}
+
+.avviso{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + var(--safeb));z-index:70;max-width:92vw;width:440px;
+  background:var(--hero-bg);color:var(--hero-ink);padding:12px 15px;border-radius:14px;font-size:14px;line-height:1.4;box-shadow:var(--ombra);
+  animation:sali .3s var(--molla);}
+.avviso b{display:block;margin-bottom:2px;}
+
+.carico{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;padding:30px;text-align:center;gap:14px;}
+.carico svg{width:74px;height:74px;}
+.carico .giro{animation:gira 2.4s linear infinite;transform-origin:50% 50%;}
+.carico .bar{width:220px;height:5px;background:var(--line);border-radius:3px;overflow:hidden;}
+.carico .bar i{display:block;height:100%;background:var(--accent);transition:width .25s;}
+.carico .fase{font-size:13px;color:var(--mute);font-family:var(--mono);}
+.benvenuto{max-width:460px;margin:0 auto;padding:calc(var(--safet) + 40px) 22px 30px;}
+.benvenuto h1{font-size:38px;letter-spacing:-1.3px;line-height:1.02;margin:16px 0 8px;}
+.benvenuto .tag{font-size:17px;color:var(--mute);line-height:1.4;margin-bottom:26px;}
+@media (min-width:700px){ .wrap{padding-top:22px;} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="suggerimento"></div>
+<script src="motore.js"></script>
+<script src="esempio.js"></script>
+<script>
+"use strict";
+var M = window.Motore, X = window.Esempio;
+
+/* ══════════════════════════════════════════════════════════════
+   STATO
+   ══════════════════════════════════════════════════════════════ */
+var VERSIONE = '1.0';
+var CHIAVI = { cfg: 'mirino_cfg_v1', mano: 'mirino_mano_v1', segui: 'mirino_segui_v1', libro: 'mirino_libro_v1',
+               visti: 'mirino_visti_v1', piani: 'mirino_piani_v1' };
+
+/* La lista di partenza: gli indici che contano e i titoli americani che si
+   muovono di piu' fra quelli che Capital.com quota come CFD. Si cambia dalle
+   impostazioni; quelli che sul tuo conto non esistono vengono saltati. */
+var LISTA_BASE = ['US500', 'US100', 'DE40', 'IT40', 'NVDA', 'TSLA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL',
+                  'AMD', 'AVGO', 'NFLX', 'PLTR', 'COIN', 'MSTR', 'UBER'];
+var CFG_BASE = { ponte: '', chiave: '', budget: null, profilo: 'aggressivo', stile: 'swing', lista: LISTA_BASE.slice(),
+                 riferimento: 'US500', esempio: true };
+
+var S = {
+  tab: 'radar', cfg: null, modo: 'esempio',
+  stato: 'carico', fase: 'Accendo il mirino', avanzamento: 0, errore: null, aggiornando: false,
+  ponte: null, conto: null, leve: null,
+  mercati: {}, cs: {}, ct: {}, folla: {}, cambi: {}, mancanti: {},
+  analisi: {}, bt: {}, calib: null, deriveCal: null, colpiTutti: [], colpiPortafoglio: [], rifSer: null,
+  capPos: [], capPosCaricate: false, verdetti: {},
+  scelto: null, foglio: null, avviso: null, scoperte: null, cerca: { testo: '', risultati: null, inCorso: false },
+  ultimoGiro: 0, ultimoCorto: 0, ultimoLungo: 0, ultimoBattito: 0, battendo: false, grafici: {}
+};
+
+/* ══════════════════════════════════════════════════════════════
+   MEMORIA DEL TELEFONO
+   ══════════════════════════════════════════════════════════════ */
+function leggi(chiave, base){
+  try{ var v = localStorage.getItem(chiave); return v == null ? base : JSON.parse(v); }catch(e){ return base; }
+}
+function scrivi(chiave, v){ try{ localStorage.setItem(chiave, JSON.stringify(v)); }catch(e){} }
+function salvaCfg(){ scrivi(CHIAVI.cfg, S.cfg); }
+
+function caricaCfg(){
+  var c = leggi(CHIAVI.cfg, null) || {};
+  var cfg = {};
+  Object.keys(CFG_BASE).forEach(function(k){ cfg[k] = c[k] !== undefined ? c[k] : (Array.isArray(CFG_BASE[k]) ? CFG_BASE[k].slice() : CFG_BASE[k]); });
+  if(!M.PROFILI[cfg.profilo]) cfg.profilo = 'aggressivo';
+  if(!M.STILI[cfg.stile]) cfg.stile = 'swing';
+  S.cfg = cfg;
+  /* ?esempio nell'indirizzo forza i dati finti, anche con il ponte collegato */
+  var forzaEsempio = /[?&]esempio\b/.test(location.search);
+  S.modo = (!forzaEsempio && cfg.ponte && cfg.chiave && !cfg.esempio) ? 'vero' : 'esempio';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LA STRADA VERSO CAPITAL.COM
+
+   Con il ponte collegato le domande vanno al Worker, che le gira a
+   Capital.com. In modalita' esempio le stesse domande vanno a esempio.js,
+   che risponde nella stessa forma: il resto dell'app non sa la differenza.
+
+   Tre domande alla volta, non di piu': Capital.com ne regge dieci al
+   secondo per utente, e il ponte serve anche il giro degli avvisi.
+   ══════════════════════════════════════════════════════════════ */
+var CODA = { attive: 0, attesa: [] };
+function inCoda(f){
+  return new Promise(function(ok, ko){ CODA.attesa.push({ f: f, ok: ok, ko: ko }); prossimo(); });
+}
+function prossimo(){
+  while(CODA.attive < 3 && CODA.attesa.length){
+    (function(x){
+      CODA.attive++;
+      x.f().then(x.ok, x.ko).then(function(){ CODA.attive--; prossimo(); });
+    })(CODA.attesa.shift());
+  }
+}
+
+function chiedi(percorso, query){
+  if(S.modo === 'esempio'){
+    return new Promise(function(ok, ko){
+      setTimeout(function(){
+        var r = X.risposta(percorso, query || {}, Date.now());
+        if(r && r.errore) ko(new Error('Mercato non trovato (' + r.errorCode + ')')); else ok(r);
+      }, 0);
+    });
+  }
+  var qs = query ? Object.keys(query).filter(function(k){ return query[k] != null && query[k] !== ''; })
+    .map(function(k){ return encodeURIComponent(k) + '=' + encodeURIComponent(query[k]); }).join('&') : '';
+  return inCoda(function(){ return chiediPonte('/api/cap/' + percorso + (qs ? '?' + qs : '')); });
+}
+
+function chiediPonte(via, opz){
+  opz = opz || {};
+  var base = String(S.cfg.ponte || '').trim().replace(/\/+$/, '');
+  return fetch(base + via, {
+    method: opz.metodo || 'GET',
+    headers: { 'Authorization': 'Bearer ' + String(S.cfg.chiave || '').trim(), 'content-type': 'application/json' },
+    body: opz.corpo ? JSON.stringify(opz.corpo) : undefined
+  }).then(function(r){
+    return r.json().catch(function(){ return {}; }).then(function(d){
+      if(!r.ok) throw new Error(d.errore || ('Il ponte ha risposto ' + r.status));
+      return d;
+    });
+  }, function(){
+    throw new Error('Il ponte non risponde. Controlla l\'indirizzo (deve finire con .workers.dev) e che il Worker sia pubblicato.');
+  });
+}
+
+/* il ponte ricorda come leggere ogni posizione, per gli avvisi su Telegram */
+function avvisaPonte(id, imp, extra){
+  if(S.modo !== 'vero' || !S.ponte || !S.ponte.memoria) return;
+  var corpo = Object.assign({ id: id, riferimento: S.cfg.riferimento }, imp, extra || {});
+  chiediPonte('/api/segui', { metodo: 'POST', corpo: corpo }).catch(function(){});
+}
+
+/* ══════════════════════════════════════════════════════════════
+   I DATI
+   ══════════════════════════════════════════════════════════════ */
+function notteDa(of){
+  if(!of || typeof of.longRate !== 'number') return null;
+  /* Capital.com da' il tasso per notte in percento (negativo = paghi). Se
+     arriva un numero grande e' un tasso annuo: si divide per 360. */
+  var conv = function(r){ var d = Math.abs(r) > 0.2 ? r / 360 : r; return -d / 100; };
+  return { lungo: conv(of.longRate), corto: conv(of.shortRate) };
+}
+
+function daDettagli(d){
+  var ins = d.instrument || {}, dr = d.dealingRules || {}, sn = d.snapshot || {};
+  var dist = dr.minNormalStopOrLimitDistance;
+  return {
+    epic: ins.epic, nome: ins.name || ins.epic, tipo: ins.type, valuta: ins.currency,
+    fattoreMargine: ins.marginFactorUnit === 'PERCENTAGE' ? ins.marginFactor : null,
+    dimMin: dr.minDealSize ? dr.minDealSize.value : null,
+    passo: dr.minSizeIncrement ? dr.minSizeIncrement.value : null,
+    distMinStopPerc: dist && dist.unit === 'PERCENTAGE' ? dist.value : null,
+    orari: ins.openingHours || null, notte: notteDa(ins.overnightFee),
+    bid: sn.bid, ask: sn.offer, varPerc: sn.percentageChange, stato: sn.marketStatus, quando: Date.now()
+  };
+}
+function aggiornaMercato(m){
+  if(!m || !m.epic) return;
+  var v = S.mercati[m.epic] || {};
+  Object.keys(m).forEach(function(k){ if(m[k] != null) v[k] = m[k]; });
+  S.mercati[m.epic] = v;
+}
+
+/* Capital.com prende fino a cinquanta mercati per domanda. Se uno solo non
+   esiste sul tuo conto, la domanda intera puo' fallire: allora si
+   richiedono uno per uno, e quelli che mancano si segnano. */
+function caricaMercati(epics){
+  var gruppi = [], i;
+  for(i = 0; i < epics.length; i += 50) gruppi.push(epics.slice(i, i + 50));
+  return Promise.all(gruppi.map(function(g){
+    return chiedi('markets', { epics: g.join(',') }).then(function(d){
+      (d.marketDetails || []).forEach(function(x){ aggiornaMercato(daDettagli(x)); });
+      g.forEach(function(e){ if(!S.mercati[e]) S.mancanti[e] = 'non arrivato'; });
+    }, function(){
+      return Promise.all(g.map(function(e){
+        return chiedi('markets/' + e).then(function(x){ aggiornaMercato(daDettagli(x)); delete S.mancanti[e]; },
+          function(err){ S.mancanti[e] = err.message; });
+      }));
+    });
+  }));
+}
+
+function valutaConto(){ return (S.conto && S.conto.valuta) || 'CHF'; }
+
+/* quanti soldi del conto vale una unita' della valuta dello strumento */
+function caricaCambi(){
+  var conto = valutaConto(), servono = {};
+  Object.keys(S.mercati).forEach(function(e){ var v = S.mercati[e].valuta; if(v && v !== conto) servono[v] = 1; });
+  return Promise.all(Object.keys(servono).map(function(v){
+    if(S.cambi[v]) return null;
+    var mid = function(x){ var s = x.snapshot || {}; return (s.bid + s.offer) / 2; };
+    return chiedi('markets/' + v + conto).then(function(x){ S.cambi[v] = mid(x); }, function(){
+      return chiedi('markets/' + conto + v).then(function(x){ S.cambi[v] = 1 / mid(x); }, function(){ S.cambi[v] = null; });
+    });
+  }));
+}
+function cambioDi(v){
+  if(!v || v === valutaConto()) return 1;
+  return S.cambi[v] > 0 ? S.cambi[v] : 1;
+}
+
+function caricaCandele(epic){
+  var st = M.STILI[S.cfg.stile];
+  return Promise.all([
+    chiedi('prices/' + epic, { resolution: st.segnale, max: st.candele }),
+    chiedi('prices/' + epic, { resolution: st.tempo, max: st.candeleTempo })
+  ]).then(function(r){
+    S.cs[epic] = M.candele(r[0]);
+    S.ct[epic] = M.candele(r[1]);
+  }, function(e){ S.mancanti[epic] = e.message; });
+}
+function caricaCorte(epic){
+  var st = M.STILI[S.cfg.stile];
+  return chiedi('prices/' + epic, { resolution: st.tempo, max: st.candeleTempo })
+    .then(function(r){ S.ct[epic] = M.candele(r); }, function(){});
+}
+
+function caricaFolla(epics){
+  return chiedi('clientsentiment', { marketIds: epics.join(',') }).then(function(d){
+    (d.clientSentiments || []).forEach(function(x){ S.folla[x.marketId] = x.longPositionPercentage; });
+  }, function(){});
+}
+
+/* Tutti i mercati che servono: la lista, il riferimento e quelli dove hai
+   una posizione aperta anche se non sono in lista. */
+function epicsVivi(){
+  var tutti = {}, out = [];
+  [S.cfg.riferimento].concat(S.cfg.lista).forEach(function(e){ tutti[e] = 1; });
+  posizioniTutte().forEach(function(p){ tutti[p.epic] = 1; });
+  Object.keys(tutti).forEach(function(e){ if(e) out.push(e); });
+  return out;
+}
+
+function carica(forza){
+  if(S.aggiornando) return;
+  S.aggiornando = true;
+  var primo = S.stato !== 'pronto';
+  if(primo){ S.stato = 'carico'; S.avanzamento = 0.02; }
+  fase('Apro il conto', 0.04);
+  var apri = S.modo === 'vero'
+    ? chiediPonte('/api/stato').then(function(st){
+        S.ponte = st;
+        if(!st.ok) throw new Error(st.problema || 'Il ponte risponde ma Capital.com no.');
+        S.conto = st.conto;
+      })
+    : chiedi('accounts').then(function(a){
+        var c = (a.accounts || [])[0];
+        S.ponte = { demo: true, telegram: false, memoria: false };
+        S.conto = c ? { valuta: c.currency, saldo: c.balance.balance, disponibile: c.balance.available, nome: c.accountName } : null;
+      });
+  apri.then(function(){
+    fase('Leggo la leva del conto', 0.08);
+    return chiedi('accounts/preferences').then(function(p){ S.leve = p.leverages || null; }, function(){ S.leve = null; });
+  }).then(function(){
+    fase('Guardo le posizioni aperte', 0.11);
+    return aggiornaPosizioni(true);
+  }).then(function(){
+    var epics = epicsVivi();
+    fase('Chiedo ' + epics.length + ' mercati a Capital.com', 0.14);
+    return caricaMercati(epics).then(function(){ return caricaCambi(); })
+      .then(function(){ return caricaFolla(S.cfg.lista); }).then(function(){ return epics; });
+  }).then(function(epics){
+    var fatti = 0, validi = epics.filter(function(e){ return S.mercati[e]; });
+    return Promise.all(validi.map(function(e){
+      return caricaCandele(e).then(function(){
+        fatti++;
+        fase('Candele di ' + ((S.mercati[e] && S.mercati[e].nome) || e) + ' · ' + fatti + '/' + validi.length,
+             0.18 + 0.7 * fatti / validi.length);
+      });
+    }));
+  }).then(function(){
+    fase('Rigioco la storia', 0.92);
+    return new Promise(function(ok){ setTimeout(function(){ analizzaTutto(); ok(); }, 20); });
+  }).then(function(){
+    S.stato = 'pronto'; S.errore = null; S.aggiornando = false;
+    S.ultimoGiro = S.ultimoCorto = S.ultimoLungo = Date.now();
+    if(!S.scelto || !S.analisi[S.scelto]) S.scelto = (classifica()[0] || {}).epic || S.cfg.lista[0];
+    controllaConsigli(true);
+    render();
+    if(S.tab === 'radar') caricaScoperte();
+  }).catch(function(e){
+    S.aggiornando = false;
+    if(primo){ S.stato = 'errore'; S.errore = e.message || String(e); }
+    else mostraAvviso('Aggiornamento non riuscito', e.message || String(e));
+    render();
+  });
+}
+
+function fase(testo, q){
+  S.fase = testo; if(q != null) S.avanzamento = q;
+  if(S.stato === 'carico') render();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   L'ANALISI
+   ══════════════════════════════════════════════════════════════ */
+function sogliaProfilo(){
+  var g = M.PROFILI[S.cfg.profilo].gradi;
+  return g.indexOf('C') >= 0 ? 28 : g.indexOf('B') >= 0 ? 40 : 55;
+}
+
+function analizzaUno(ep){
+  var cs = S.cs[ep], mk = S.mercati[ep] || {};
+  if(!cs || cs.length < M.CALDO){
+    S.analisi[ep] = { ok: false, motivo: cs ? 'Solo ' + cs.length + ' candele: troppo poche' : (S.mancanti[ep] || 'Nessuna candela') };
+    return null;
+  }
+  var an = M.analizza(cs, S.ct[ep], {
+    rif: ep === S.cfg.riferimento ? null : S.rifSer, percLunghi: S.folla[ep],
+    prezzo: mk.bid > 0 ? { bid: mk.bid, ask: mk.ask } : null
+  });
+  S.analisi[ep] = an;
+  return an;
+}
+
+/* Ogni mercato: analisi di adesso e storia rigiocata con le regole del
+   profilo che hai scelto. Poi tutti i colpi insieme per la calibrazione. */
+function analizzaTutto(){
+  var rifCs = S.cs[S.cfg.riferimento];
+  S.rifSer = rifCs && rifCs.length >= M.CALDO ? M.indicatori(rifCs) : null;
+  var soglia = sogliaProfilo(), st = M.STILI[S.cfg.stile], colpi = [], derive = [];
+  S.analisi = {}; S.bt = {};
+  epicsVivi().forEach(function(ep){
+    var an = analizzaUno(ep);
+    if(!an || !an.ok) return;
+    var mk = S.mercati[ep] || {};
+    var bt = M.backtest(S.cs[ep], { ser: an.ser, soglia: soglia, stile: S.cfg.stile, notte: mk.notte || undefined });
+    var r = M.riassumi(bt.colpi);
+    r.colpi = bt.colpi;
+    S.bt[ep] = r;
+    /* nella calibrazione entrano solo i mercati della lista: una posizione
+       aperta su un mercato strano non deve spostare le probabilita' di tutti */
+    if(S.cfg.lista.indexOf(ep) >= 0 || ep === S.cfg.riferimento){
+      bt.colpi.forEach(function(c){ c.epic = ep; colpi.push(c); });
+      derive = derive.concat(M.derive(an.ser, bt.punti, st.orizzonte));
+    }
+  });
+  colpi.sort(function(a, b){ return a.t - b.t; });
+  S.colpiTutti = colpi;
+  S.colpiPortafoglio = M.portafoglio(colpi, M.PROFILI[S.cfg.profilo].colpi);
+  S.calib = M.calibra(colpi);
+  S.deriveCal = M.calibraDerive(derive);
+}
+
+/* I mercati in ordine: prima quelli che il tuo profilo giocherebbe, per
+   forza del segnale; poi gli altri. */
+function classifica(){
+  var prof = M.PROFILI[S.cfg.profilo];
+  return S.cfg.lista.map(function(ep){ return { epic: ep, an: S.analisi[ep] }; })
+    .filter(function(x){ return x.an && x.an.ok; })
+    .map(function(x){ x.gioca = !!x.an.grado && prof.gradi.indexOf(x.an.grado) >= 0; return x; })
+    .sort(function(a, b){ return (b.gioca - a.gioca) || (Math.abs(b.an.punti) - Math.abs(a.an.punti)); });
+}
+
+function strumentoDi(ep){
+  var mk = S.mercati[ep] || {};
+  var lv = S.leve && mk.tipo && S.leve[mk.tipo] ? S.leve[mk.tipo] : null;
+  return { valuta: mk.valuta, fattoreMargine: mk.fattoreMargine, leva: lv ? lv.current : null, leve: lv ? lv.available : null,
+           dimMin: mk.dimMin, passo: mk.passo, distMinStopPerc: mk.distMinStopPerc, tipo: mk.tipo };
+}
+
+function prezzoVivo(ep){
+  var mk = S.mercati[ep];
+  return mk && mk.bid > 0 && mk.ask > 0 ? { bid: mk.bid, ask: mk.ask } : null;
+}
+
+function pianoDi(ep, dirForzata){
+  var an = S.analisi[ep];
+  if(!an || !an.ok) return null;
+  var tm = M.tempismo(an, S.ct[ep], prezzoVivo(ep));
+  if(dirForzata && dirForzata !== an.dir){
+    var anD = Object.assign({}, an, { dir: dirForzata });
+    tm = M.tempismo(anD, S.ct[ep], prezzoVivo(ep));
+  }
+  var mk = S.mercati[ep] || {};
+  return M.piano({ an: an, tempismo: tm, dir: dirForzata || an.dir || 1, budget: S.cfg.budget || 0, profilo: S.cfg.profilo,
+                   stile: S.cfg.stile, strumento: strumentoDi(ep), cambio: cambioDi(mk.valuta), calib: S.calib,
+                   notte: mk.notte || undefined });
+}
+
+/* Ricordarsi i piani guardati serve a una cosa: quando una posizione nuova
+   compare su Capital.com, se dieci minuti prima stavi guardando il piano di
+   quel mercato, si prende il suo stop e il suo rischio. */
+function ricordaPiano(ep, p){
+  if(!p || !p.ok) return;
+  var piani = leggi(CHIAVI.piani, {});
+  piani[ep] = { dir: p.dir, R: p.R, stop: p.stop, punti: (S.analisi[ep] || {}).punti, quando: Date.now(), stile: S.cfg.stile };
+  scrivi(CHIAVI.piani, piani);
+}
+function pianoRecente(ep, dir, aperta){
+  var p = leggi(CHIAVI.piani, {})[ep];
+  if(!p || p.dir !== dir) return null;
+  return aperta - p.quando < 6 * 3600000 && p.quando - aperta < 3600000 ? p : null;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LE POSIZIONI
+
+   Due fonti: quelle aperte su Capital.com, che il ponte vede da solo, e
+   quelle segnate a mano (in modalita' esempio, o prese da un altro conto).
+   Per quelle di Capital.com il telefono ricorda solo come leggerle: il
+   rischio iniziale, se hai gia' preso meta', se hai rinforzato.
+   ══════════════════════════════════════════════════════════════ */
+function daCapital(p){
+  var pos = p.position || {}, mk = p.market || {};
+  var quando = pos.createdDateUTC || pos.createdDate || '';
+  return {
+    id: pos.dealId, epic: mk.epic, nome: mk.instrumentName || mk.epic, tipo: mk.instrumentType,
+    dir: pos.direction === 'SELL' ? -1 : 1, entrata: +pos.level, dim: +pos.size,
+    aperta: Date.parse(/Z$/.test(quando) ? quando : quando + 'Z') || Date.now(),
+    stopBroker: pos.stopLevel != null ? +pos.stopLevel : null, obiettivo: pos.profitLevel != null ? +pos.profitLevel : null,
+    leva: pos.leverage || null, valuta: pos.currency || mk.currency || '', upl: pos.upl,
+    bid: +mk.bid, ask: +mk.offer, stato: mk.marketStatus, capital: true
+  };
+}
+
+function aggiornaPosizioni(primaVolta){
+  return chiedi('positions').then(function(d){
+    riconcilia((d.positions || []).map(daCapital), primaVolta);
+  }, function(e){ if(primaVolta) S.problemaPosizioni = e.message; });
+}
+
+function riconcilia(lista, primaVolta){
+  var segui = leggi(CHIAVI.segui, {}), visti = leggi(CHIAVI.visti, null);
+  var mai = visti === null;
+  visti = visti || {};
+  var nuove = [];
+  lista.forEach(function(p){
+    if(!segui[p.id]) segui[p.id] = adotta(p);
+    if(!visti[p.id]){ visti[p.id] = Date.now(); if(!mai && S.capPosCaricate) nuove.push(p); }
+    var mk = S.mercati[p.epic];
+    if(mk && p.bid > 0){ mk.bid = p.bid; mk.ask = p.ask; }
+  });
+  /* sparite: chiuse su Capital.com (dallo stop, dall'obiettivo o da te) */
+  S.capPos.forEach(function(p){
+    if(lista.some(function(q){ return q.id === p.id; })) return;
+    registraChiusura(Object.assign({}, p, segui[p.id] || {}), null, 'Chiusa su Capital.com');
+    delete segui[p.id];
+  });
+  scrivi(CHIAVI.segui, segui);
+  scrivi(CHIAVI.visti, visti);
+  S.capPos = lista;
+  S.capPosCaricate = true;
+  nuove.forEach(function(p){
+    var imp = segui[p.id] || {};
+    mostraAvviso('Ti ho visto entrare', (S.mercati[p.epic] ? S.mercati[p.epic].nome : p.nome) + ' ' + (p.dir > 0 ? 'lungo' : 'corto') + ': ' +
+      fmt(p.dim, p.dim % 1 ? 2 : 0) + ' a ' + prezzo(p.entrata) + ' alle ' + ora(p.aperta) + '.' +
+      (imp.daPiano ? ' Uso lo stop e il rischio del piano che stavi guardando.' : ''));
+  });
+  /* mercati nuovi (posizione su un titolo fuori lista): si caricano */
+  var daCaricare = lista.filter(function(p){ return !S.cs[p.epic]; }).map(function(p){ return p.epic; });
+  if(daCaricare.length && !primaVolta && S.stato === 'pronto'){
+    caricaMercati(daCaricare).then(caricaCambi).then(function(){
+      return Promise.all(daCaricare.map(caricaCandele));
+    }).then(function(){ daCaricare.forEach(analizzaUno); render(); });
+  }
+}
+
+/* La prima volta che si vede una posizione si fissa il suo rischio
+   iniziale. Dallo stop messo su Capital.com se c'e', dal piano che stavi
+   guardando se c'e', altrimenti dalla regola (1.5 ATR prima dell'entrata). */
+function adotta(p){
+  var piano = pianoRecente(p.epic, p.dir, p.aperta), imp = { stile: S.cfg.stile };
+  if(p.stopBroker != null && (p.stopBroker - p.entrata) * p.dir < 0) imp.stopIniziale = p.stopBroker;
+  else if(piano){ imp.R = piano.R; imp.daPiano = true; }
+  if(piano){ imp.puntiEntrata = piano.punti; imp.daPiano = true; }
+  imp.passo = S.mercati[p.epic] && S.mercati[p.epic].passo || undefined;
+  avvisaPonte(p.id, imp);
+  return imp;
+}
+
+/* se il rischio non si e' potuto fissare (candele non ancora arrivate), lo
+   si fissa adesso, una volta per tutte */
+function assicuraRischio(pos){
+  if(pos.R > 0 || pos.stopIniziale != null) return pos;
+  var cs = S.cs[pos.epic];
+  if(!cs || cs.length < 20) return pos;
+  var R = M.rischioIniziale(cs, M.indicatori(cs), pos.aperta);
+  if(!R) return pos;
+  pos.R = R;
+  if(pos.manuale){ salvaManuale(pos.id, { R: R }); }
+  else { var segui = leggi(CHIAVI.segui, {}); segui[pos.id] = Object.assign(segui[pos.id] || {}, { R: R }); scrivi(CHIAVI.segui, segui); avvisaPonte(pos.id, segui[pos.id]); }
+  return pos;
+}
+
+function posizioniTutte(){
+  var segui = leggi(CHIAVI.segui, {});
+  var cap = S.capPos.map(function(p){
+    var imp = segui[p.id] || {};
+    var x = Object.assign({}, p, imp);
+    x.stop = p.stopBroker != null ? p.stopBroker : (imp.stopMentale != null ? imp.stopMentale : null);
+    return x;
+  });
+  var mano = leggi(CHIAVI.mano, []).map(function(m){ return Object.assign({ manuale: true }, m); });
+  return cap.concat(mano);
+}
+
+function salvaManuale(id, cambi){
+  var lista = leggi(CHIAVI.mano, []);
+  lista.forEach(function(m){ if(m.id === id) Object.assign(m, cambi); });
+  scrivi(CHIAVI.mano, lista);
+}
+
+function consiglioDi(pos){
+  assicuraRischio(pos);
+  var an = S.analisi[pos.epic], mk = S.mercati[pos.epic] || {};
+  var px = mk.bid > 0 ? { bid: mk.bid, ask: mk.ask } : (pos.bid > 0 ? { bid: pos.bid, ask: pos.ask } : null);
+  if(!px && !(an && an.ok)) return null;
+  var orario = mk.orari ? M.orari(mk.orari, Date.now()) : null;
+  return M.consiglio({ pos: pos, prezzo: px, ct: S.ct[pos.epic], an: an && an.ok ? an : null, stile: S.cfg.stile,
+                       ora: Date.now(), orari: orario, cambio: cambioDi(mk.valuta || pos.valuta) });
+}
+
+var DA_AVVISARE = { esci: 1, incassa: 1, meta: 1, stop: 1, rinforza: 1 };
+function controllaConsigli(silenzio){
+  posizioniTutte().forEach(function(p){
+    var c = consiglioDi(p);
+    if(!c) return;
+    var prima = S.verdetti[p.id];
+    S.verdetti[p.id] = c.verdetto;
+    if(silenzio || !prima || prima === c.verdetto || !DA_AVVISARE[c.verdetto]) return;
+    var nome = (S.mercati[p.epic] && S.mercati[p.epic].nome) || p.nome || p.epic;
+    mostraAvviso(c.titolo + ' · ' + nome, c.frase);
+    notifica(c.titolo + ' · ' + nome, c.frase);
+  });
+}
+
+function urgenti(){
+  var n = 0;
+  posizioniTutte().forEach(function(p){ var v = S.verdetti[p.id]; if(v && v !== 'tieni' && v !== 'attento') n++; });
+  return n;
+}
+
+/* Il libro: le posizioni chiuse, con il risultato. Per quelle chiuse su
+   Capital.com il prezzo d'uscita e' l'ultimo visto: approssimato, e lo dice. */
+function registraChiusura(pos, prezzoUscita, nota){
+  var mk = S.mercati[pos.epic] || {};
+  var uscita = prezzoUscita != null ? prezzoUscita : (pos.dir > 0 ? (mk.bid || pos.bid) : (mk.ask || pos.ask));
+  if(!(uscita > 0)) return;
+  var R = pos.R > 0 ? pos.R : (pos.stopIniziale != null ? Math.abs(pos.entrata - pos.stopIniziale) : null);
+  var pnl = (uscita - pos.entrata) * pos.dir * pos.dim * cambioDi(mk.valuta || pos.valuta);
+  var libro = leggi(CHIAVI.libro, []);
+  libro.unshift({ epic: pos.epic, nome: mk.nome || pos.nome || pos.epic, dir: pos.dir, entrata: pos.entrata, uscita: uscita,
+                  dim: pos.dim, aperta: pos.aperta, chiusa: Date.now(), pnl: pnl, r: R ? (uscita - pos.entrata) * pos.dir / R : null,
+                  valuta: valutaConto(), approssimato: prezzoUscita == null, nota: nota || '' });
+  scrivi(CHIAVI.libro, libro.slice(0, 200));
+}
+
+/* ══════════════════════════════════════════════════════════════
+   IL BATTITO
+
+   Ogni dieci secondi, con l'app davanti: prezzi e posizioni. Ogni due
+   minuti le candele corte dei mercati dove sei dentro; ogni dieci le
+   lunghe; ogni mezz'ora tutto da capo. Con l'app in tasca il telefono
+   addormenta i timer: per questo gli avvisi veri li manda il ponte.
+   ══════════════════════════════════════════════════════════════ */
+function battito(){
+  if(S.stato !== 'pronto' || S.battendo || S.aggiornando) return;
+  var adesso = Date.now();
+  if(document.hidden && adesso - S.ultimoBattito < 60000) return;
+  S.ultimoBattito = adesso;
+  S.battendo = true;
+  var vivi = epicsVivi().filter(function(e){ return S.mercati[e]; });
+  var dentro = posizioniTutte().map(function(p){ return p.epic; });
+  if(S.scelto && dentro.indexOf(S.scelto) < 0) dentro.push(S.scelto);
+  var lavori = [caricaMercati(vivi), aggiornaPosizioni(false)];
+  var corte = adesso - S.ultimoCorto > 120000, lunghe = adesso - S.ultimoLungo > 600000;
+  if(corte){ S.ultimoCorto = adesso; dentro.forEach(function(e){ lavori.push(caricaCorte(e)); }); }
+  if(lunghe){ S.ultimoLungo = adesso; dentro.forEach(function(e){ lavori.push(caricaCandele(e)); }); }
+  Promise.all(lavori).then(function(){
+    if(corte || lunghe) dentro.forEach(analizzaUno);
+  }).catch(function(){}).then(function(){
+    S.battendo = false;
+    controllaConsigli(false);
+    if(adesso - S.ultimoGiro > 30 * 60000){ carica(true); return; }
+    if(!S.foglio) render();
+  });
+}
+setInterval(battito, 10000);
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) battito(); });
+
+/* ══════════════════════════════════════════════════════════════
+   AVVISI
+   ══════════════════════════════════════════════════════════════ */
+var timerAvviso = null;
+function mostraAvviso(titolo, testo){
+  S.avviso = { titolo: titolo, testo: testo };
+  disegnaAvviso();
+  clearTimeout(timerAvviso);
+  timerAvviso = setTimeout(function(){ S.avviso = null; disegnaAvviso(); }, 6500);
+  if(navigator.vibrate) try{ navigator.vibrate([60, 40, 60]); }catch(e){}
+}
+function disegnaAvviso(){
+  var el = document.getElementById('avviso');
+  if(el) el.remove();
+  if(!S.avviso) return;
+  el = document.createElement('div');
+  el.id = 'avviso'; el.className = 'avviso';
+  el.innerHTML = '<b>' + esc(S.avviso.titolo) + '</b>' + esc(S.avviso.testo);
+  el.onclick = function(){ S.avviso = null; el.remove(); };
+  document.body.appendChild(el);
+}
+function notifica(titolo, testo){
+  if(!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+  var opz = { body: testo, icon: 'icon.svg', tag: 'mirino-' + titolo };
+  if(navigator.serviceWorker && navigator.serviceWorker.ready){
+    navigator.serviceWorker.ready.then(function(r){ r.showNotification('Mirino · ' + titolo, opz); }).catch(function(){});
+  } else { try{ new Notification('Mirino · ' + titolo, opz); }catch(e){} }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   FORMATI
+   ══════════════════════════════════════════════════════════════ */
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+  return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+var FORMATI = {};
+function fmt(x, dec){
+  if(typeof x !== 'number' || !isFinite(x)) return '—';
+  dec = dec == null ? 2 : dec;
+  if(!FORMATI[dec]) FORMATI[dec] = new Intl.NumberFormat('it-CH', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  return FORMATI[dec].format(x);
+}
+function soldi(x, dec){ return fmt(x, dec == null ? 0 : dec) + ' ' + valutaConto(); }
+function conSegno(x, dec){ return (x > 0 ? '+' : x < 0 ? '−' : '') + fmt(Math.abs(x), dec); }
+function soldiS(x, dec){ return conSegno(x, dec == null ? 0 : dec) + ' ' + valutaConto(); }
+function prezzo(x){ return typeof x === 'number' && isFinite(x) ? fmt(x, M.decimaliPer(x)) : '—'; }
+function pc(x, dec){ return typeof x === 'number' && isFinite(x) ? fmt(x * 100, dec == null ? 1 : dec) + '%' : '—'; }
+function pcS(x, dec){ return typeof x === 'number' && isFinite(x) ? conSegno(x * 100, dec == null ? 1 : dec) + '%' : '—'; }
+function erre(x){ return typeof x === 'number' && isFinite(x) ? conSegno(x, 2) + 'R' : '—'; }
+function ora(ms){ return new Date(ms).toLocaleTimeString('it-CH', { hour: '2-digit', minute: '2-digit' }); }
+function giorno(ms){ return new Date(ms).toLocaleDateString('it-CH', { day: 'numeric', month: 'short' }); }
+function giornoOra(ms){
+  var d = new Date(ms), oggi = new Date();
+  if(d.toDateString() === oggi.toDateString()) return 'oggi ' + ora(ms);
+  return d.toLocaleDateString('it-CH', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + ora(ms);
+}
+function durata(ms){
+  var m = Math.max(0, Math.round(ms / 60000));
+  if(m < 60) return m + ' min';
+  var h = Math.floor(m / 60);
+  if(h < 24) return h + 'h ' + (m % 60) + 'm';
+  return Math.floor(h / 24) + 'g ' + (h % 24) + 'h';
+}
+function nomeDi(ep){ return (S.mercati[ep] && S.mercati[ep].nome) || ep; }
+function verso(dir){ return dir > 0 ? 'Lungo' : 'Corto'; }
+function verbo(dir){ return dir > 0 ? 'compra' : 'vendi'; }
+var FRECCIA_SU = '<svg viewBox="0 0 10 10"><path d="M5 1.5 9 7H1z" fill="currentColor"/></svg>';
+var FRECCIA_GIU = '<svg viewBox="0 0 10 10"><path d="M5 8.5 1 3h8z" fill="currentColor"/></svg>';
+function pillola(dir, testo){
+  if(!dir) return '<span class="dir n">' + (testo || 'Fermo') + '</span>';
+  return '<span class="dir ' + (dir > 0 ? 'l' : 'c') + '">' + (dir > 0 ? FRECCIA_SU : FRECCIA_GIU) + (testo || verso(dir)) + '</span>';
+}
+function freccia(dir){
+  return '<span class="num" style="color:' + (dir > 0 ? 'var(--lungo)' : 'var(--corto)') + '" aria-label="' + verso(dir) + '">' + (dir > 0 ? '▲' : '▼') + '</span>';
+}
+function gradoHTML(g){ return g ? '<span class="grado ' + g + '" title="grado ' + g + '">' + g + '</span>' : ''; }
+function barraPunti(p){
+  var w = Math.min(50, Math.abs(p) / 2);
+  return '<div class="barra"><i class="' + (p >= 0 ? 'l' : 'c') + '" style="width:' + w + '%"></i></div>' +
+    '<span class="punti">' + M.segno(p) + '</span>';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   GRAFICI
+
+   SVG a mano: una linea sottile, un asse solo, le etichette dei livelli a
+   destra. Il dito (o il mouse) sopra il grafico mostra il valore: i dati
+   di ogni grafico stanno in S.grafici, indicizzati per id.
+   ══════════════════════════════════════════════════════════════ */
+function sparkline(cs, dir){
+  if(!cs || cs.length < 5) return '';
+  var v = cs.slice(-60).map(function(c){ return c.c; });
+  var mn = Math.min.apply(null, v), mx = Math.max.apply(null, v), W = 84, H = 30;
+  var pts = v.map(function(x, i){ return (i / (v.length - 1) * (W - 4) + 2).toFixed(1) + ',' + (H - 3 - (x - mn) / ((mx - mn) || 1) * (H - 6)).toFixed(1); });
+  var ult = pts[pts.length - 1].split(',');
+  return '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true"><polyline points="' + pts.join(' ') +
+    '" fill="none" stroke="var(--mute)" stroke-width="1.5" stroke-linejoin="round"/>' +
+    '<circle cx="' + ult[0] + '" cy="' + ult[1] + '" r="3" fill="' + (dir > 0 ? 'var(--lungo)' : dir < 0 ? 'var(--corto)' : 'var(--neutro)') + '"/></svg>';
+}
+
+/* Prezzo, eventuale cono di previsione e livelli. serie: [{t, v}] */
+/* Il grafico si disegna alla larghezza vera dello schermo: con un viewBox
+   fisso le scritte su un telefono diventano di cinque pixel. */
+function larghezzaGrafico(){
+  var app = document.getElementById('app');
+  return Math.round(Math.min(640, Math.max(290, ((app && app.clientWidth) || 390) - 66)));
+}
+
+function graficoPrezzo(id, serie, opz){
+  opz = opz || {};
+  var W = larghezzaGrafico(), H = opz.alto || 220, sx = 4, dx = 92, su = 12, giu = 22;
+  var cono = opz.cono || null, livelli = opz.livelli || [];
+  var n = serie.length, nTot = n + (cono ? cono.passi.length - 1 : 0);
+  var vals = serie.map(function(p){ return p.v; });
+  if(cono) cono.passi.forEach(function(p){ vals.push(p.lo90, p.hi90); });
+  livelli.forEach(function(l){ if(isFinite(l.v)) vals.push(l.v); });
+  var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), marg = (mx - mn) * 0.06 || 1;
+  mn -= marg; mx += marg;
+  /* il futuro prende un quarto della larghezza, qualunque sia l'orizzonte:
+     altrimenti cinque giorni accanto a sessanta sono una riga */
+  var largo = W - sx - dx, quotaStoria = cono ? 0.76 : 1;
+  var X = function(i){
+    if(i <= n - 1) return sx + i / Math.max(1, n - 1) * largo * quotaStoria;
+    return sx + largo * quotaStoria + (i - (n - 1)) / Math.max(1, nTot - n) * largo * (1 - quotaStoria);
+  };
+  var Y = function(v){ return su + (1 - (v - mn) / (mx - mn)) * (H - su - giu); };
+  var h = '<svg class="graf" id="' + id + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(opz.titolo || 'grafico del prezzo') + '">';
+  /* griglia leggera: tre righe */
+  for(var g = 0; g <= 2; g++){
+    var vg = mn + (mx - mn) * (0.15 + g * 0.35);
+    h += '<line class="asse" x1="' + sx + '" x2="' + (W - dx) + '" y1="' + Y(vg).toFixed(1) + '" y2="' + Y(vg).toFixed(1) + '" opacity=".5"/>';
+  }
+  if(cono){
+    var p = cono.passi, base = n - 1;
+    var fascia = function(lo, hi){
+      var a = p.map(function(q, k){ return X(base + k).toFixed(1) + ',' + Y(q[hi]).toFixed(1); });
+      var b = p.slice().reverse().map(function(q, k){ return X(base + p.length - 1 - k).toFixed(1) + ',' + Y(q[lo]).toFixed(1); });
+      return a.concat(b).join(' ');
+    };
+    h += '<polygon class="b90" points="' + fascia('lo90', 'hi90') + '"/>';
+    h += '<polygon class="b68" points="' + fascia('lo68', 'hi68') + '"/>';
+    h += '<polyline class="centro" points="' + p.map(function(q, k){ return X(base + k).toFixed(1) + ',' + Y(q.centro).toFixed(1); }).join(' ') + '"/>';
+  }
+  livelli.forEach(function(l){
+    if(!isFinite(l.v)) return;
+    var y = Y(l.v).toFixed(1);
+    h += '<line class="lv ' + l.c + '" x1="' + sx + '" x2="' + (W - dx + 4) + '" y1="' + y + '" y2="' + y + '"/>';
+    h += '<text x="' + (W - dx + 8) + '" y="' + (+y + 3.5) + '">' + esc(l.n) + ' ' + prezzo(l.v) + '</text>';
+  });
+  h += '<polyline class="linea" points="' + serie.map(function(q, i){ return X(i).toFixed(1) + ',' + Y(q.v).toFixed(1); }).join(' ') + '"/>';
+  if(opz.etichettaX) h += '<text x="' + sx + '" y="' + (H - 6) + '">' + esc(opz.etichettaX[0]) + '</text>' +
+    '<text x="' + (W - dx) + '" y="' + (H - 6) + '" text-anchor="end">' + esc(opz.etichettaX[1]) + '</text>';
+  h += '<line class="croce" x1="0" x2="0" y1="' + su + '" y2="' + (H - giu) + '"/><circle class="punto" r="4" cx="0" cy="0"/>';
+  h += '</svg>';
+  var punti = serie.map(function(q, i){ return { x: X(i), y: Y(q.v), testo: q.etichetta || prezzo(q.v) }; });
+  if(cono) cono.passi.forEach(function(q, k){
+    if(k === 0) return;
+    punti.push({ x: X(n - 1 + k), y: Y(q.centro), testo: '+' + k + ' ' + (opz.unita || '') + ' · ' + prezzo(q.lo68) + '–' + prezzo(q.hi68) });
+  });
+  S.grafici[id] = { W: W, punti: punti };
+  return h;
+}
+
+function graficoCurva(id, colpi){
+  var W = larghezzaGrafico(), H = 190, sx = 4, dx = 46, su = 10, giu = 22, cum = 0;
+  var pts = [{ t: colpi.length ? colpi[0].t : 0, v: 0 }];
+  colpi.forEach(function(c){ cum += c.r; pts.push({ t: c.t, v: cum, c: c }); });
+  var vals = pts.map(function(p){ return p.v; });
+  var mn = Math.min(0, Math.min.apply(null, vals)), mx = Math.max(0, Math.max.apply(null, vals));
+  if(mx === mn) mx = mn + 1;
+  var X = function(i){ return sx + i / Math.max(1, pts.length - 1) * (W - sx - dx); };
+  var Y = function(v){ return su + (1 - (v - mn) / (mx - mn)) * (H - su - giu); };
+  var h = '<svg class="graf" id="' + id + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Guadagno cumulato in R">';
+  h += '<line class="zero" x1="' + sx + '" x2="' + (W - dx) + '" y1="' + Y(0) + '" y2="' + Y(0) + '"/>';
+  h += '<text x="' + (W - dx + 6) + '" y="' + (Y(0) + 3) + '">0R</text>';
+  h += '<text x="' + (W - dx + 6) + '" y="' + (Y(cum) + 3) + '">' + conSegno(cum, 0) + 'R</text>';
+  h += '<polyline class="curva" points="' + pts.map(function(p, i){ return X(i).toFixed(1) + ',' + Y(p.v).toFixed(1); }).join(' ') + '"/>';
+  if(colpi.length) h += '<text x="' + sx + '" y="' + (H - 5) + '">' + esc(giorno(colpi[0].t) + ' ' + new Date(colpi[0].t).getFullYear()) + '</text>' +
+    '<text x="' + (W - dx) + '" y="' + (H - 5) + '" text-anchor="end">' + esc(giorno(colpi[colpi.length - 1].t)) + '</text>';
+  h += '<line class="croce" x1="0" x2="0" y1="' + su + '" y2="' + (H - giu) + '"/><circle class="punto" r="4" cx="0" cy="0"/></svg>';
+  S.grafici[id] = { W: W, punti: pts.map(function(p, i){
+    return { x: X(i), y: Y(p.v), testo: p.c ? giorno(p.t) + ' · ' + p.c.epic + ' ' + (p.c.dir > 0 ? '▲' : '▼') + ' ' + erre(p.c.r) + ' · tot ' + conSegno(p.v, 1) + 'R' : 'inizio' };
+  }) };
+  return h;
+}
+
+/* il dito sul grafico */
+function suGrafico(e){
+  var svg = e.target.closest && e.target.closest('svg.graf');
+  var tip = document.getElementById('suggerimento');
+  if(!svg || !S.grafici[svg.id]){ if(tip) tip.style.opacity = 0; document.querySelectorAll('svg.graf.attivo').forEach(function(s){ s.classList.remove('attivo'); }); return; }
+  var g = S.grafici[svg.id], r = svg.getBoundingClientRect();
+  var x = (e.clientX - r.left) / r.width * g.W, migliore = null, d = Infinity;
+  g.punti.forEach(function(p){ var q = Math.abs(p.x - x); if(q < d){ d = q; migliore = p; } });
+  if(!migliore) return;
+  svg.classList.add('attivo');
+  var cr = svg.querySelector('.croce'), pu = svg.querySelector('.punto');
+  cr.setAttribute('x1', migliore.x); cr.setAttribute('x2', migliore.x);
+  pu.setAttribute('cx', migliore.x); pu.setAttribute('cy', migliore.y);
+  tip.textContent = migliore.testo;
+  tip.style.opacity = 1;
+  var tx = r.left + migliore.x / g.W * r.width, ty = r.top + migliore.y / g.W * r.width;
+  tip.style.left = Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 8, tx - tip.offsetWidth / 2)) + 'px';
+  tip.style.top = Math.max(8, ty - 40) + 'px';
+}
+document.addEventListener('pointermove', suGrafico);
+document.addEventListener('pointerdown', suGrafico);
+document.addEventListener('scroll', function(){ var t = document.getElementById('suggerimento'); if(t) t.style.opacity = 0; }, true);
+
+/* ══════════════════════════════════════════════════════════════
+   RADAR
+   ══════════════════════════════════════════════════════════════ */
+function bannerEsempio(){
+  if(S.modo !== 'esempio') return '';
+  return '<div class="nota amb"><b>Dati d\'esempio.</b> Prezzi inventati per vedere com\'e\' fatta l\'app: non giocarci sopra. ' +
+    'Collega il tuo conto Capital.com dalla scheda <b>Ponte</b>.</div>';
+}
+
+function vento(){
+  var an = S.analisi[S.cfg.riferimento], mk = S.mercati[S.cfg.riferimento] || {};
+  if(!an || !an.ok) return null;
+  var p = an.punti, testo, sub;
+  if(p >= 40){ testo = 'Vento a favore dei lunghi'; sub = nomeDi(S.cfg.riferimento) + ' sopra le medie e in spinta: i lunghi giocano in casa.'; }
+  else if(p <= -40){ testo = 'Vento a favore dei corti'; sub = nomeDi(S.cfg.riferimento) + ' sotto le medie e in discesa: i corti giocano in casa, i lunghi controcorrente.'; }
+  else if(p > 10){ testo = 'Brezza su'; sub = 'Il mercato sale ma senza convinzione: meglio i titoli piu\' forti dell\'indice.'; }
+  else if(p < -10){ testo = 'Brezza giu\''; sub = 'Il mercato scende piano: i lunghi solo sui titoli che reggono meglio dell\'indice.'; }
+  else { testo = 'Mare piatto'; sub = 'Nessuna direzione sull\'indice: si gioca titolo per titolo, stop stretti.'; }
+  return { testo: testo, sub: sub, punti: p, varPerc: mk.varPerc };
+}
+
+function tabRadar(){
+  var h = bannerEsempio();
+  var v = vento(), prof = M.PROFILI[S.cfg.profilo], lista = classifica();
+  var pronti = lista.filter(function(x){ return x.gioca; });
+  h += '<div class="hero"><svg class="mirino" viewBox="0 0 100 100" aria-hidden="true">' + MIRINO_SVG + '</svg>' +
+    '<div class="l">Il mercato oggi · ' + esc(nomeDi(S.cfg.riferimento)) + '</div>' +
+    '<div class="v">' + esc(v ? v.testo : 'Riferimento non disponibile') + '</div>' +
+    '<div class="s">' + esc(v ? v.sub : 'Manca ' + S.cfg.riferimento + ': controlla la lista nella scheda Ponte.') + '</div>' +
+    '<div class="riga"><div>Oggi<b>' + (v ? pcS((v.varPerc || 0) / 100, 2) : '—') + '</b></div>' +
+    '<div>Punteggio<b>' + (v ? M.segno(v.punti) : '—') + '</b></div>' +
+    '<div>Pronti<b>' + pronti.length + ' / ' + lista.length + '</b></div></div></div>';
+
+  h += '<div class="kpi" onclick="vai(\'colpo\')" style="cursor:pointer">' +
+    '<div><div class="l">Budget</div><div class="v">' + (S.cfg.budget ? fmt(S.cfg.budget, 0) : '—') + '</div><div class="s">' + valutaConto() + ' in gioco</div></div>' +
+    '<div><div class="l">Rischio a colpo</div><div class="v">' + fmt((S.cfg.budget || 0) * prof.rischio, 0) + '</div><div class="s">' + pc(prof.rischio, 1) + ' · ' + prof.nome + '</div></div>' +
+    '<div><div class="l">Stile</div><div class="v">' + M.STILI[S.cfg.stile].nome + '</div><div class="s">' + (S.cfg.stile === 'swing' ? 'giorni, non ore' : 'fuori prima di sera') + '</div></div></div>';
+
+  h += '<div class="h2">Pronti adesso<span class="r">' + esc(prof.nome) + ' · grado ' + prof.gradi.split('').join(', ') + '</span></div>';
+  if(!pronti.length){
+    h += '<div class="card"><div class="vuoto"><b>Niente da giocare adesso</b>Nessun mercato della lista ha un segnale abbastanza forte per il profilo ' +
+      esc(prof.nome) + '. Non entrare per noia: il mercato riapre domani.' +
+      (S.cfg.profilo !== 'spinto' ? '<br><br>Con il profilo <b>Spinto</b> entrerebbero anche i segnali C.' : '') + '</div></div>';
+  }
+  pronti.forEach(function(x){ h += rigaRadar(x.epic); });
+
+  var quasi = lista.filter(function(x){ return !x.gioca && x.an.grado; });
+  if(quasi.length){
+    h += '<div class="h2">Quasi<span class="r">segnale debole per il profilo</span></div>';
+    quasi.forEach(function(x){ h += rigaRadar(x.epic); });
+  }
+  var fermi = lista.filter(function(x){ return !x.an.grado; });
+  if(fermi.length){
+    h += '<div class="h2">Fermi<span class="r">nessun segnale</span></div><div class="mini">' + fermi.map(function(x){
+      return '<span class="chip" onclick="scegli(\'' + x.epic + '\')">' + esc(nomeDi(x.epic)) + ' <span class="num muto">' + M.segno(x.an.punti) + '</span></span>';
+    }).join('') + '</div>';
+  }
+  var guasti = S.cfg.lista.filter(function(e){ return !S.analisi[e] || !S.analisi[e].ok; });
+  if(guasti.length){
+    h += '<p class="piccolo" style="margin-top:14px">Non letti: ' + guasti.map(function(e){
+      return esc(e) + ' (' + esc((S.analisi[e] && S.analisi[e].motivo) || S.mancanti[e] || 'nessun dato') + ')';
+    }).join(', ') + '.</p>';
+  }
+  h += sezioneScoperte();
+  return h;
+}
+
+function rigaRadar(ep){
+  var an = S.analisi[ep], mk = S.mercati[ep] || {}, bt = S.bt[ep];
+  var tm = an.tempismo || {}, chiuso = mk.stato && mk.stato !== 'TRADEABLE';
+  var chip = tm.tipo === 'mercato' ? '<span class="chip acc">Entra ora</span>'
+           : tm.tipo === 'limite' ? '<span class="chip">Limite ' + prezzo(tm.livello) + '</span>'
+           : '<span class="chip">Se rompe ' + prezzo(tm.livello) + '</span>';
+  if(chiuso) chip = '<span class="chip amb">Chiuso</span>' + chip;
+  var folla = S.folla[ep] != null ? '<span class="piccolo">' + fmt(S.folla[ep], 0) + '% clienti lunghi</span>' : '';
+  var storia = bt && bt.n >= 5 ? '<span class="piccolo dx num">storia ' + fmt(bt.pVince * 100, 0) + '% · ' + erre(bt.rMedio) + '</span>' : '';
+  var px = mk.bid > 0 ? (mk.bid + mk.ask) / 2 : an.prezzo;
+  return '<div class="mk" onclick="scegli(\'' + ep + '\')">' +
+    '<div class="su">' + gradoHTML(an.grado) +
+      '<div class="nm"><b>' + esc(nomeDi(ep)) + '</b><span>' + esc(ep) + '</span></div>' +
+      sparkline(S.cs[ep], an.grado ? an.dir : 0) +
+      '<div class="px"><b>' + prezzo(px) + '</b><span class="' + ((mk.varPerc || 0) >= 0 ? 'pos' : 'neg') + '">' + pcS((mk.varPerc || 0) / 100, 2) + '</span></div></div>' +
+    '<div class="su">' + pillola(an.grado ? an.dir : 0) + barraPunti(an.punti) + '</div>' +
+    '<div class="giu">' + chip + folla + storia + '</div></div>';
+}
+
+/* Dove si muove Capital.com oggi: i titoli piu' volatili e quelli che
+   salgono e scendono di piu'. Non sono consigli: sono posti da guardare. */
+function caricaScoperte(){
+  if(S.scoperte && Date.now() - S.scoperte.quando < 15 * 60000) return;
+  var nodi = [['Piu\' volatili', 'hierarchy_v1.commons.most_volatile'], ['In salita', 'hierarchy_v1.commons.top_gainers'],
+              ['In discesa', 'hierarchy_v1.commons.top_losers']];
+  S.scoperte = { quando: Date.now(), gruppi: [] };
+  Promise.all(nodi.map(function(n){
+    return chiedi('marketnavigation/' + n[1], { limit: 12 }).then(function(d){
+      return { nome: n[0], mercati: (d.markets || []).filter(function(m){ return m.instrumentType === 'SHARES' || m.instrumentType === 'INDICES'; }).slice(0, 8) };
+    }, function(){ return null; });
+  })).then(function(g){
+    S.scoperte.gruppi = g.filter(function(x){ return x && x.mercati.length; });
+    if(S.tab === 'radar' && !S.foglio) render();
+  });
+}
+function sezioneScoperte(){
+  if(!S.scoperte || !S.scoperte.gruppi.length) return '';
+  var h = '<div class="h2">Dove si muove Capital.com</div><p class="lede">Posti da guardare, non consigli. Tocca per aggiungerli alla lista: ' +
+    'li leggo con le stesse regole degli altri.</p>';
+  S.scoperte.gruppi.forEach(function(g){
+    h += '<div class="card piatta" style="padding:13px 14px"><div class="piccolo" style="margin-bottom:8px;font-weight:600">' + esc(g.nome) + '</div><div class="mini">' +
+      g.mercati.map(function(m){
+        var dentro = S.cfg.lista.indexOf(m.epic) >= 0;
+        return '<span class="chip' + (dentro ? ' acc' : '') + '" onclick="' + (dentro ? 'scegli' : 'aggiungiMercato') + '(\'' + esc(m.epic) + '\')">' +
+          esc(m.instrumentName || m.epic) + ' <span class="num ' + (m.percentageChange >= 0 ? 'pos' : 'neg') + '">' + pcS((m.percentageChange || 0) / 100, 1) + '</span>' +
+          (dentro ? '' : ' +') + '</span>';
+      }).join('') + '</div></div>';
+  });
+  return h;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   IL COLPO
+   ══════════════════════════════════════════════════════════════ */
+function tabColpo(){
+  var h = bannerEsempio(), prof = M.PROFILI[S.cfg.profilo];
+  h += '<div class="card"><div class="h2" style="margin:0 0 4px">Quanto vuoi mettere in gioco</div>' +
+    '<div class="budget"><input id="budget" type="number" inputmode="decimal" min="0" step="50" value="' + (S.cfg.budget || '') + '" placeholder="0" oninput="impostaBudget(this.value)">' +
+    '<span>' + valutaConto() + '</span></div>' +
+    (S.conto && S.conto.disponibile != null ? '<p class="piccolo" style="margin:-6px 0 12px">Disponibili sul conto Capital.com: <b class="num">' + soldi(S.conto.disponibile) + '</b>. ' +
+      'Il budget e\' la parte che decidi di rischiare con Mirino, non tutto il conto.</p>' : '') +
+    '<div class="seg" style="margin-bottom:8px">' + Object.keys(M.PROFILI).map(function(k){
+      return '<button class="' + (S.cfg.profilo === k ? 'on' : '') + '" onclick="impostaProfilo(\'' + k + '\')">' + M.PROFILI[k].nome + '</button>';
+    }).join('') + '</div><p class="piccolo" style="margin:0 0 12px">' + esc(prof.frase) + '</p>' +
+    '<div class="seg">' + Object.keys(M.STILI).map(function(k){
+      return '<button class="' + (S.cfg.stile === k ? 'on' : '') + '" onclick="impostaStile(\'' + k + '\')">' + M.STILI[k].nome + '</button>';
+    }).join('') + '</div><p class="piccolo" style="margin:8px 0 0">' + (S.cfg.stile === 'swing'
+      ? 'Segnale sulle candele giornaliere, momento sulle orarie. Si tiene da qualche giorno a tre settimane.'
+      : 'Segnale sulle orarie, momento sui quarti d\'ora. Si esce prima della chiusura: niente notti da pagare.') + '</p></div>';
+
+  if(!S.cfg.budget){
+    return h + '<div class="card"><div class="vuoto"><b>Prima il budget</b>Scrivi quanto vuoi mettere in gioco: da li\' escono taglia, stop e margine di ogni colpo.</div></div>';
+  }
+
+  /* il piano della settimana: il budget diviso sui colpi migliori */
+  var piani = classifica().filter(function(x){ return x.gioca; }).map(function(x){ var p = pianoDi(x.epic); if(p) p.epic = x.epic; return p; }).filter(Boolean);
+  var rip = M.ripartisci(piani, S.cfg.budget, S.cfg.profilo);
+  h += '<div class="h2">Il piano adesso<span class="r">max ' + prof.colpi + ' colpi</span></div>';
+  if(rip.scelti.length){
+    h += '<div class="card" style="padding:6px 14px"><table class="tab-d"><tr><th>Mercato</th><th>Ordine</th><th>Rischio</th><th>Margine</th></tr>' +
+      rip.scelti.map(function(p){
+        return '<tr onclick="scegli(\'' + p.epic + '\')" style="cursor:pointer"><td class="t">' + freccia(p.dir) + ' <b>' + esc(nomeDi(p.epic)) + '</b></td>' +
+          '<td>' + fmt(p.dim, p.passo < 1 ? 2 : 0) + ' ' + (p.tipo === 'mercato' ? 'ora' : '@' + prezzo(p.entrata)) + '</td>' +
+          '<td>' + fmt(p.perdita, 0) + '</td><td>' + fmt(p.margine, 0) + '</td></tr>';
+      }).join('') + '</table></div>' +
+      '<div class="kpi"><div><div class="l">Rischio totale</div><div class="v">' + fmt(rip.rischio, 0) + '</div><div class="s">' + pc(rip.rischio / S.cfg.budget, 1) + ' del budget se scattano tutti gli stop</div></div>' +
+      '<div><div class="l">Margine</div><div class="v">' + fmt(rip.margine, 0) + '</div><div class="s">' + pc(rip.margine / S.cfg.budget, 0) + ' del budget bloccato</div></div>' +
+      '<div><div class="l">Libero</div><div class="v">' + fmt(rip.libero, 0) + '</div><div class="s">' + valutaConto() + ' per rinforzare</div></div></div>';
+  } else {
+    h += '<div class="card"><div class="vuoto"><b>Nessun colpo adesso</b>Con il profilo ' + esc(prof.nome) + ' nessun mercato e\' pronto, o il budget non basta per la taglia minima.</div></div>';
+  }
+
+  /* il piano del mercato scelto */
+  var ep = S.scelto;
+  var top = classifica().slice(0, 8);
+  h += '<div class="h2">Il colpo su</div><div class="mini" style="margin-bottom:10px">' + top.map(function(x){
+    return '<span class="chip' + (x.epic === ep ? ' acc' : '') + '" onclick="scegli(\'' + x.epic + '\')">' + gradoHTML(x.an.grado) + ' ' + esc(nomeDi(x.epic)) + '</span>';
+  }).join('') + '<select onchange="scegli(this.value)" style="border:1px solid var(--line);background:var(--card2);border-radius:9px;padding:5px 8px;font-size:12px">' +
+    '<option value="">Altro…</option>' + epicsVivi().filter(function(e){ return S.analisi[e] && S.analisi[e].ok; }).map(function(e){
+      return '<option value="' + esc(e) + '"' + (e === ep ? ' selected' : '') + '>' + esc(nomeDi(e)) + '</option>';
+    }).join('') + '</select></div>';
+  h += schedaPiano(ep);
+  return h;
+}
+
+function schedaPiano(ep){
+  var an = S.analisi[ep];
+  if(!an || !an.ok) return '<div class="card"><div class="vuoto"><b>' + esc(nomeDi(ep)) + '</b>' + esc((an && an.motivo) || 'Nessun dato') + '</div></div>';
+  var p = pianoDi(ep), mk = S.mercati[ep] || {}, prof = M.PROFILI[S.cfg.profilo], st = M.STILI[S.cfg.stile];
+  if(!p) return '';
+  ricordaPiano(ep, p);
+  var h = '', dec = p.passo < 1 ? 2 : 0, qta = fmt(p.dim, dec);
+  var chiuso = mk.stato && mk.stato !== 'TRADEABLE';
+  var orario = mk.orari ? M.orari(mk.orari, Date.now()) : null;
+
+  if(!an.grado){
+    h += '<div class="nota">Nessun segnale su ' + esc(nomeDi(ep)) + ': punteggio ' + M.segno(an.punti) + '. Il piano qui sotto e\' quello che servirebbe se entrassi ' +
+      (an.dir >= 0 ? 'lungo' : 'corto') + ' adesso, ma il motore non lo farebbe.</div>';
+  } else if(!p.ammesso){
+    h += '<div class="nota amb">Il profilo ' + esc(prof.nome) + ' non giocherebbe un grado ' + an.grado + '. Se entri lo stesso, ecco come: la taglia e\' gia\' ridotta.</div>';
+  }
+
+  var tipoTesto = p.tipo === 'mercato' ? 'a mercato' : p.tipo === 'limite' ? 'con ordine limite a <span class="q">' + prezzo(p.entrata) + '</span>' : 'con ordine stop a <span class="q">' + prezzo(p.entrata) + '</span>';
+  h += '<div class="hero"><svg class="mirino" viewBox="0 0 100 100" aria-hidden="true">' + MIRINO_SVG + '</svg>' +
+    '<div class="l">' + esc(nomeDi(ep)) + ' · ' + esc(ep) + ' · grado ' + (an.grado || '—') + ' · ' + M.segno(an.punti) + '</div>' +
+    '<div class="v ordine">' + (p.ok ? (verbo(p.dir).charAt(0).toUpperCase() + verbo(p.dir).slice(1)) + ' <span class="q">' + qta + '</span> ' + tipoTesto : 'Il budget non basta') + '</div>' +
+    '<div class="s">' + esc(p.motivoTempo) + (chiuso ? ' Adesso e\' chiuso' + (orario && orario.apre ? ': riapre ' + giornoOra(orario.apre) : '') + '.' : '') + '</div>' +
+    '<div class="riga"><div>Entrata<b>' + prezzo(p.entrata) + '</b></div><div>Stop<b>' + prezzo(p.stop) + '</b></div>' +
+    '<div>Obiettivi<b>' + prezzo(p.tp1) + ' · ' + prezzo(p.tp2) + '</b></div></div></div>';
+
+  var m1 = p.dim / 2 * M.REGOLE.tp1 * p.R * p.cambio, m2 = p.dim / 2 * M.REGOLE.tp2 * p.R * p.cambio;
+  h += '<div class="card"><div class="liv">' +
+    rigaLivello('Entrata', p.tipo === 'mercato' ? 'a mercato' : p.tipo === 'limite' ? 'ordine limite' : 'ordine stop', p.entrata, '', 'var(--mute)') +
+    rigaLivello('Stop', pcS((p.stop - p.entrata) / p.entrata, 1), p.stop, '<span class="neg">' + soldiS(-p.perdita) + '</span>', 'var(--warn)') +
+    rigaLivello('Obiettivo 1', 'chiudi meta\' · ' + pcS((p.tp1 - p.entrata) / p.entrata, 1), p.tp1, '<span class="pos">' + soldiS(m1) + '</span>', 'var(--ok)') +
+    rigaLivello('Obiettivo 2', 'chiudi il resto · ' + pcS((p.tp2 - p.entrata) / p.entrata, 1), p.tp2, '<span class="pos">' + soldiS(m2) + '</span>', 'var(--ok)', true) +
+    '</div></div>';
+
+  h += '<div class="kpi"><div><div class="l">Rischio</div><div class="v neg">' + fmt(p.perdita, 0) + '</div><div class="s">' + pc(p.budget ? p.perdita / p.budget : 0, 1) + ' del budget, se scatta lo stop</div></div>' +
+    '<div><div class="l">Se va</div><div class="v pos">' + fmt(p.guadagnoPiano, 0) + '</div><div class="s">meta\' al primo, meta\' al secondo</div></div>' +
+    '<div><div class="l">Margine</div><div class="v">' + fmt(p.margine, 0) + '</div><div class="s">leva ' + M.fmtLeva(p.leva) + ' · valore ' + fmt(p.valore, 0) + '</div></div></div>';
+
+  h += '<div class="card"><div class="h2" style="margin:0 0 8px">Su Capital.com</div><ol class="elenco">' +
+    '<li>' + esc(nomeDi(ep)) + ' › <b>' + (p.dir > 0 ? 'Compra' : 'Vendi') + '</b>' + (p.tipo === 'mercato' ? '' : ' › ordine in attesa a <b class="num">' + prezzo(p.entrata) + '</b>') + '.</li>' +
+    '<li>Due posizioni da <b class="num">' + fmt(M.giuAlPasso(p.dim / 2, p.passo), dec) + '</b> e <b class="num">' + fmt(p.dim - M.giuAlPasso(p.dim / 2, p.passo), dec) + '</b>: ' +
+      'la prima con take profit a <b class="num">' + prezzo(p.tp1) + '</b>, la seconda a <b class="num">' + prezzo(p.tp2) + '</b>. Cosi\' l\'incasso a meta\' lo fa Capital.com da solo.</li>' +
+    '<li>Stop loss a <b class="num">' + prezzo(p.stop) + '</b> su tutte e due. Leva ' + M.fmtLeva(p.leva) +
+      (p.leva < p.levaMax ? ' (puoi salire a ' + M.fmtLeva(p.levaMax) + ': cambia solo il margine, non il rischio)' : '') + '.</li>' +
+    '<li>Premi <b>Sono entrato</b> qui sotto' + (S.modo === 'vero' ? ' — o non fare niente: la posizione la vedo comparire da solo.' : '.') + '</li></ol></div>';
+
+  /* le probabilita', dal backtest */
+  var cal = S.calib && an.grado ? S.calib.perGrado[an.grado] : null;
+  h += '<div class="h2">Quante volte va bene</div>';
+  if(cal && cal.n >= 10){
+    h += '<div class="card"><p style="margin:0;font-size:14.5px;line-height:1.55">Rigiocando la storia di tutti i mercati della lista, i segnali di grado <b>' + an.grado +
+      '</b> sono stati <b>' + cal.n + '</b>: <b>' + fmt(cal.pVinceStima * 100, 0) + '%</b> chiusi in guadagno, primo obiettivo toccato nel ' + fmt(cal.pTp1Stima * 100, 0) +
+      '%, <b>' + erre(cal.rMedioStima) + '</b> in media a colpo.</p>' +
+      '<div class="kpi" style="margin:12px 0 0"><div><div class="l">Vince</div><div class="v">' + fmt(cal.pVinceStima * 100, 0) + '%</div></div>' +
+      '<div><div class="l">Media</div><div class="v ' + (cal.rMedioStima >= 0 ? 'pos' : 'neg') + '">' + erre(cal.rMedioStima) + '</div></div>' +
+      '<div><div class="l">Atteso</div><div class="v ' + (cal.rMedioStima >= 0 ? 'pos' : 'neg') + '">' + conSegno(cal.rMedioStima * p.perdita, 0) + '</div><div class="s">' + valutaConto() + ' a colpo</div></div></div>' +
+      '<p class="piccolo" style="margin:10px 0 0">In media su tanti colpi, non questa volta. ' +
+      (S.modo === 'esempio' ? '<b>Con i dati d\'esempio questi numeri non valgono niente.</b>' : 'Dettagli nella scheda Precisione.') + '</p></div>';
+  } else {
+    h += '<div class="card"><p class="piccolo" style="margin:0">Troppi pochi colpi di questo grado nella storia per dire una percentuale onesta.</p></div>';
+  }
+
+  /* la previsione */
+  var prev = M.previsione(an, S.deriveCal, st.orizzonte);
+  var serie = S.cs[ep].slice(-60).map(function(c){ return { v: c.c, etichetta: giorno(c.t) + ' · ' + prezzo(c.c) }; });
+  h += '<div class="h2">Dove puo\' andare<span class="r">' + st.orizzonte + ' ' + st.unita + '</span></div><div class="card">' +
+    graficoPrezzo('g-prev', serie, { cono: prev, unita: st.unita, titolo: 'Prezzo e previsione di ' + nomeDi(ep),
+      livelli: [{ n: 'stop', v: p.stop, c: 's' }, { n: 'ob.1', v: p.tp1, c: 't' }, { n: 'ob.2', v: p.tp2, c: 't' }, { n: 'entra', v: p.entrata, c: 'e' }],
+      etichettaX: [giorno(S.cs[ep][Math.max(0, S.cs[ep].length - 60)].t), '+' + st.orizzonte + ' ' + st.unita] }) +
+    '<div class="etichette"><span><i style="border-color:var(--accent)"></i>centro</span><span><i style="border-color:var(--warn)"></i>stop</span>' +
+    '<span><i style="border-color:var(--ok)"></i>obiettivi</span><span>fascia: 68% e 90%</span></div>' +
+    '<p style="font-size:14px;line-height:1.5;margin:12px 0 0">Fra ' + st.orizzonte + ' ' + st.unita + ', due volte su tre fra <b class="num">' + prezzo(prev.b68[0]) + '</b> e <b class="num">' + prezzo(prev.b68[1]) +
+    '</b>; nove su dieci fra ' + prezzo(prev.b90[0]) + ' e ' + prezzo(prev.b90[1]) + '. ' +
+    (Math.abs(prev.z) < 0.05 ? 'La storia non da\' una direzione a questo grado: il centro resta sul prezzo di oggi.'
+      : 'Il centro (' + prezzo(prev.centro) + ', ' + pcS(prev.mossaAttesa, 1) + ') e\' quanto si e\' mosso in media il prezzo dopo segnali di grado ' + an.grado + ', su ' + prev.n + ' casi.') + '</p></div>';
+
+  /* il perche' */
+  h += '<div class="h2">Perche\'</div><div class="card"><div class="parti">' + partiHTML(an) + '</div></div>';
+
+  /* gli avvisi */
+  var note = p.avvisi.slice();
+  if(p.liquidazione && isFinite(p.liquidazione.prezzo) && p.liquidazione.perc < 0.5) note.push('Senza stop, Capital.com ti chiuderebbe verso ' + prezzo(p.liquidazione.prezzo) + ' (' + pcS(-p.dir * p.liquidazione.perc, 0) + '), se il budget fosse tutto il conto.');
+  if(S.cfg.stile === 'swing' && p.costoNotte > 0) note.push('Ogni notte dentro costa circa ' + soldi(p.costoNotte, 2) + ' di finanziamento (sul valore intero, non sul margine).');
+  if(p.levaEffettiva > 0) note.push('Esposizione: ' + fmt(p.levaEffettiva, 1) + ' volte il budget, un 1% di movimento vale ' + soldi(p.valore * 0.01) + '. ' +
+    (p.levaEffettiva < 1 ? 'Si muove tanto, quindi lo stop e\' lontano e la posizione piccola: la leva qui serve a bloccare meno margine. Sugli indici l\'esposizione sale.'
+                         : 'La leva ' + M.fmtLeva(p.leva) + ' decide il margine; la perdita la decide lo stop.'));
+  if(note.length) h += '<div class="card piatta"><ul class="elenco" style="margin:0">' + note.map(function(n){ return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></div>';
+
+  h += '<div class="fila" style="margin-top:6px"><button class="btn acc" onclick="sonoEntrato(\'' + ep + '\')"' + (p.ok ? '' : ' disabled') + '>Sono entrato</button></div>';
+  return h;
+}
+
+function rigaLivello(nome, desc, v, soldiTesto, colore, ultima){
+  var c = ultima ? ' ult' : '';
+  return '<div class="n' + c + '"><i style="background:' + colore + '"></i>' + esc(nome) + '</div><div class="d' + c + '">' + esc(desc) + '</div>' +
+    '<div class="p' + c + '">' + prezzo(v) + '</div><div class="m' + c + '">' + (soldiTesto || '') + '</div>';
+}
+
+var NOMI_PARTI = {
+  trend: 'Trend', momento: 'Momento', macd: 'Accelerazione', rottura: 'Rottura', estensione: 'Estensione',
+  forzaRel: 'Forza rel.', regime: 'Indice', folla: 'Folla'
+};
+function perche(k, v, an){
+  if(k === 'trend') return v > 0.3 ? 'Prezzo sopra le medie, medie in salita.' : v < -0.3 ? 'Prezzo sotto le medie, medie in discesa.' : 'Medie intrecciate: nessuna strada chiara.';
+  if(k === 'momento') return v > 0.3 ? 'Negli ultimi 20 e 60 periodi e\' salito piu\' di quanto oscilla di solito.' : v < -0.3 ? 'Negli ultimi 20 e 60 periodi e\' sceso piu\' di quanto oscilla di solito.' : 'Rendimento recente nella norma.';
+  if(k === 'macd') return v > 0.2 ? 'Sta accelerando verso l\'alto.' : v < -0.2 ? 'Sta accelerando verso il basso.' : 'Velocita\' costante.';
+  if(k === 'rottura') return v > 0.6 ? 'Ha chiuso sopra il massimo delle ultime 20 candele.' : v < -0.6 ? 'Ha chiuso sotto il minimo delle ultime 20 candele.' : 'Dentro il canale delle ultime 20 candele.';
+  if(k === 'estensione') return v < -0.15 ? 'Tirato verso l\'alto (RSI ' + fmt(an.rsi, 0) + '): comprare qui vuol dire stop lontano.' : v > 0.15 ? 'Tirato verso il basso (RSI ' + fmt(an.rsi, 0) + '): vendere qui vuol dire stop lontano.' : 'Non tirato: RSI ' + fmt(an.rsi, 0) + '.';
+  if(k === 'forzaRel') return v > 0.2 ? 'Fa meglio dell\'indice.' : v < -0.2 ? 'Fa peggio dell\'indice.' : 'Va come l\'indice.';
+  if(k === 'regime') return v > 0.5 ? 'L\'indice di riferimento e\' in trend su.' : v < -0.5 ? 'L\'indice di riferimento e\' in trend giu\'.' : 'L\'indice di riferimento e\' incerto.';
+  if(k === 'folla') return fmt(an.percLunghi, 0) + '% dei clienti Capital.com e\' lungo. Si legge al contrario: la folla compra quello che scende.';
+  return '';
+}
+function partiHTML(an){
+  return Object.keys(NOMI_PARTI).filter(function(k){ return an.parti[k] != null; }).map(function(k){
+    var v = an.parti[k];
+    return '<div class="parte"><span class="nome">' + NOMI_PARTI[k] + '</span>' + barraPunti(Math.round(v * 100)) +
+      '<span class="perche">' + esc(perche(k, v, an)) + '</span></div>';
+  }).join('') + '<p class="piccolo" style="margin:6px 0 0">ADX ' + fmt(an.adx, 0) + (an.adx < 20 ? ': poca direzione, trend e momento pesano meno.' : ': il mercato ha una direzione.') + '</p>';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   IN GIOCO
+   ══════════════════════════════════════════════════════════════ */
+function tabGioco(){
+  var h = bannerEsempio(), lista = posizioniTutte();
+  var conC = lista.map(function(p){ return { p: p, c: consiglioDi(p) }; });
+  conC.sort(function(a, b){ return (a.c ? M.VERDETTI[a.c.verdetto].ordine : 9) - (b.c ? M.VERDETTI[b.c.verdetto].ordine : 9); });
+  if(!lista.length){
+    h += '<div class="card"><div class="vuoto"><b>Nessuna posizione aperta</b>' +
+      (S.modo === 'vero' ? 'Quando apri una posizione su Capital.com la vedo comparire da sola, entro pochi secondi.' : 'Quando entri, premi <b>Sono entrato</b> nel Colpo.') +
+      '</div></div>';
+  } else {
+    var tot = 0;
+    conC.forEach(function(x){ if(x.c) tot += x.c.pnlConto; });
+    h += '<div class="kpi"><div><div class="l">Posizioni</div><div class="v">' + lista.length + '</div></div>' +
+      '<div><div class="l">Aperto</div><div class="v ' + (tot >= 0 ? 'pos' : 'neg') + '">' + conSegno(tot, 0) + '</div><div class="s">' + valutaConto() + '</div></div>' +
+      '<div><div class="l">Da fare</div><div class="v">' + urgenti() + '</div><div class="s">consigli da seguire</div></div></div>';
+    conC.forEach(function(x){ h += schedaPosizione(x.p, x.c); });
+  }
+  h += '<div class="fila" style="margin:4px 0 0"><button class="btn" onclick="apriManuale()">Aggiungi a mano</button></div>';
+  if(S.modo === 'vero'){
+    h += '<p class="piccolo" style="margin:12px 3px 0">' + (S.ponte && S.ponte.telegram && S.ponte.memoria
+      ? 'Il ponte sorveglia le posizioni anche con l\'app chiusa: quando un consiglio cambia, arriva su Telegram.'
+      : 'Con l\'app chiusa nessuno ti avvisa. Accendi gli avvisi su Telegram: istruzioni nella scheda Ponte.') + '</p>';
+  }
+  h += libroHTML();
+  return h;
+}
+
+function schedaPosizione(p, c){
+  var mk = S.mercati[p.epic] || {}, h = '<div class="card">';
+  h += '<div class="pos-testa">' + pillola(p.dir) + '<div class="nm"><b>' + esc(nomeDi(p.epic)) + '</b><div>' + fmt(p.dim, p.dim % 1 ? 2 : 0) + ' a ' + prezzo(p.entrata) +
+    ' · da ' + durata(Date.now() - p.aperta) + ' · ' + (p.capital ? 'Capital.com' : 'a mano') + '</div></div>' +
+    (c ? '<div class="num ' + (c.pnlConto >= 0 ? 'pos' : 'neg') + '" style="font-weight:700;font-size:16px">' + soldiS(c.pnlConto) + '</div>' : '') + '</div>';
+  if(!c){ return h + '<p class="piccolo">Nessun prezzo per ' + esc(p.epic) + ' adesso.</p></div>'; }
+  h += '<div class="verdetto ' + c.tono + '"><div class="t">' + esc(c.titolo) + '</div><div class="f">' + esc(c.frase) + '</div></div>';
+  h += '<div class="cifre"><div><div class="l">Prezzo</div><div class="v">' + prezzo(c.uscita) + '</div></div>' +
+    '<div><div class="l">In R</div><div class="v ' + (c.rOra >= 0 ? 'pos' : 'neg') + '">' + erre(c.rOra) + '</div></div>' +
+    '<div><div class="l">Stop</div><div class="v">' + prezzo(c.stopEff) + '</div></div></div>';
+  var ct = S.ct[p.epic];
+  if(ct && ct.length > 5){
+    var serie = ct.slice(-80).map(function(x){ return { v: x.c, etichetta: giornoOra(x.t) + ' · ' + prezzo(x.c) }; });
+    h += graficoPrezzo('g-pos-' + p.id, serie, { alto: 170, titolo: 'Andamento di ' + nomeDi(p.epic),
+      livelli: [{ n: 'entrata', v: p.entrata, c: 'e' }, { n: 'stop', v: c.stopEff, c: 's' }, { n: 'ob.1', v: c.tp1, c: 't' }, { n: 'ob.2', v: c.tp2, c: 't' }] });
+  }
+  var righe = c.motivi.slice(c.verdetto === 'attento' ? 1 : 0).concat(c.info);
+  if(righe.length) h += '<ul class="elenco">' + righe.map(function(r){ return '<li>' + esc(r) + '</li>'; }).join('') + '</ul>';
+  var az = [];
+  if(!p.parziale && c.rMax >= M.REGOLE.tp1 * 0.9) az.push('<button class="btn picc ok" onclick="segna(\'' + esc(p.id) + '\',\'parziale\')">Ho preso meta\'</button>');
+  if(c.verdetto === 'stop' || (p.manuale && c.faseStop !== 'iniziale')) az.push('<button class="btn picc" onclick="segna(\'' + esc(p.id) + '\',\'stop\')">Stop spostato a ' + prezzo(c.stopRegola) + '</button>');
+  if(c.verdetto === 'rinforza') az.push('<button class="btn picc" onclick="segna(\'' + esc(p.id) + '\',\'rinforzata\')">Ho rinforzato</button>');
+  if(p.manuale) az.push('<button class="btn picc ' + (c.tono === 'rosso' ? 'ko' : '') + '" onclick="apriChiusura(\'' + esc(p.id) + '\')">Ho chiuso</button>');
+  if(az.length) h += '<div class="fila" style="margin-top:10px">' + az.join('') + '</div>';
+  if(p.capital) h += '<p class="piccolo" style="margin:10px 0 0">Quando la chiudi su Capital.com sparisce da qui e finisce nel libro.</p>';
+  return h + '</div>';
+}
+
+function libroHTML(){
+  var libro = leggi(CHIAVI.libro, []);
+  if(!libro.length) return '';
+  var tot = 0, vinte = 0, rs = [];
+  libro.forEach(function(x){ tot += x.pnl; if(x.pnl > 0) vinte++; if(x.r != null) rs.push(x.r); });
+  var h = '<div class="h2">Il libro<span class="r">' + libro.length + ' chiuse</span></div>' +
+    '<div class="kpi"><div><div class="l">Risultato</div><div class="v ' + (tot >= 0 ? 'pos' : 'neg') + '">' + conSegno(tot, 0) + '</div><div class="s">' + valutaConto() + '</div></div>' +
+    '<div><div class="l">Vinte</div><div class="v">' + fmt(vinte / libro.length * 100, 0) + '%</div></div>' +
+    '<div><div class="l">R medio</div><div class="v">' + (rs.length ? erre(rs.reduce(function(a, b){ return a + b; }, 0) / rs.length) : '—') + '</div></div></div>';
+  h += '<div class="card" style="padding:6px 14px"><table class="tab-d"><tr><th>Mercato</th><th>Chiusa</th><th>R</th><th>' + valutaConto() + '</th></tr>' +
+    libro.slice(0, 30).map(function(x){
+      return '<tr><td class="t">' + (x.dir > 0 ? '▲ ' : '▼ ') + esc(x.nome) + '</td><td>' + giorno(x.chiusa) + '</td><td>' + (x.r != null ? erre(x.r) : '—') + '</td>' +
+        '<td class="' + (x.pnl >= 0 ? 'pos' : 'neg') + '">' + (x.approssimato ? '≈' : '') + conSegno(x.pnl, 0) + '</td></tr>';
+    }).join('') + '</table></div><p class="piccolo" style="margin:0 3px">≈ chiusa su Capital.com: l\'uscita e\' l\'ultimo prezzo visto, non quello esatto.</p>';
+  return h;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PRECISIONE
+   ══════════════════════════════════════════════════════════════ */
+function tabPrecisione(){
+  var h = bannerEsempio(), cal = S.calib, prof = M.PROFILI[S.cfg.profilo], st = M.STILI[S.cfg.stile];
+  if(!cal || !cal.tutti.n){
+    return h + '<div class="card"><div class="vuoto"><b>Niente da misurare</b>La storia dei mercati in lista e\' troppo corta, o nessun segnale ha superato la soglia del profilo.</div></div>';
+  }
+  var t = M.riassumi(S.colpiPortafoglio), rischio = (S.cfg.budget || 0) * prof.rischio * 0.85;
+  var solidita = Math.abs(t.tStat) >= 3 ? 'difficilmente e\' fortuna' : Math.abs(t.tStat) >= 2 ? 'probabilmente non e\' fortuna, ma il margine e\' stretto' : 'potrebbe essere fortuna';
+  var anni = S.colpiPortafoglio.length ? (S.colpiPortafoglio[S.colpiPortafoglio.length - 1].t - S.colpiPortafoglio[0].t) / (365.25 * 86400000) : 0;
+  h += '<div class="h2">Ci si puo\' fidare?</div><div class="card"><p style="margin:0;font-size:15px;line-height:1.6">' +
+    'Rigiocando ' + (anni >= 1 ? 'gli ultimi ' + fmt(anni, 1) + ' anni' : 'gli ultimi ' + fmt(anni * 12, 0) + ' mesi') + ' di ' + S.cfg.lista.length + ' mercati, con le regole del profilo <b>' + prof.nome +
+    '</b> in stile <b>' + st.nome + '</b> e al massimo ' + prof.colpi + ' colpi aperti insieme, il motore avrebbe fatto <b>' + t.n + ' colpi</b>: ' + fmt(t.pVince * 100, 0) + '% in guadagno, <b>' + erre(t.rMedio) + '</b> in media.' +
+    (rischio > 0 ? ' Con il tuo budget vuol dire circa ' + soldiS(t.rMedio * rischio) + ' a colpo, e un periodo peggiore di ' + soldiS(-t.maxDD * rischio) + ' (' + fmt(t.maxDD, 1) + 'R di fila).' : '') +
+    ' Statisticamente ' + solidita + ' (t = ' + fmt(t.tStat, 1) + ').</p>' +
+    (S.modo === 'esempio' ? '<div class="nota warn"><b>Sono dati inventati.</b> Il generatore d\'esempio ha fasi di trend fatte apposta: qualunque regola di trend ci vince. ' +
+      'Questi numeri servono a vedere com\'e\' fatta la pagina, non a decidere.</div>' : '') + '</div>';
+
+  h += '<div class="kpi"><div><div class="l">Colpi</div><div class="v">' + t.n + '</div></div><div><div class="l">Vinti</div><div class="v">' + fmt(t.pVince * 100, 0) + '%</div></div>' +
+    '<div><div class="l">R medio</div><div class="v ' + (t.rMedio >= 0 ? 'pos' : 'neg') + '">' + erre(t.rMedio) + '</div></div></div>' +
+    '<div class="kpi"><div><div class="l">Peggior serie</div><div class="v neg">' + fmt(-t.maxDD, 1) + 'R</div></div><div><div class="l">Vinto / perso</div><div class="v">' + (isFinite(t.fattore) ? fmt(t.fattore, 2) : '∞') + '</div></div>' +
+    '<div><div class="l">Durata media</div><div class="v">' + fmt(t.barreMedie, 1) + '</div><div class="s">' + st.unita + '</div></div></div>';
+
+  h += '<div class="h2">I colpi, uno dopo l\'altro</div><div class="card">' + graficoCurva('g-curva', S.colpiPortafoglio) +
+    '<p class="piccolo" style="margin:8px 0 0">Il guadagno cumulato in R, colpo dopo colpo, con al massimo ' + prof.colpi + ' colpi aperti: quando i posti sono pieni ' +
+    'i segnali nuovi si saltano, come farai tu. Le discese sono quelle che vivrai anche tu.</p></div>';
+
+  h += '<div class="h2">Per grado<span class="r">tutti i ' + cal.tutti.n + ' segnali</span></div><p class="lede">Qui ogni segnale conta, anche quelli saltati per mancanza di posti: ' +
+    'e\' da qui che escono le probabilita\' del Colpo.</p><div class="card" style="padding:6px 14px"><table class="tab-d"><tr><th>Grado</th><th>Colpi</th><th>Vinti</th><th>Ob. 1</th><th>R medio</th></tr>' +
+    ['A', 'B', 'C'].map(function(g){
+      var x = cal.perGrado[g];
+      if(!x.n) return '<tr><td class="t">' + gradoHTML(g) + '</td><td colspan="4" class="muto">fuori dal profilo</td></tr>';
+      return '<tr><td class="t">' + gradoHTML(g) + '</td><td>' + x.n + '</td><td>' + fmt(x.pVince * 100, 0) + '%</td><td>' + fmt(x.pTp1 * 100, 0) + '%</td>' +
+        '<td class="' + (x.rMedio >= 0 ? 'pos' : 'neg') + '">' + erre(x.rMedio) + '</td></tr>';
+    }).join('') + '</table></div>';
+  h += '<div class="card" style="padding:6px 14px"><table class="tab-d"><tr><th>Direzione</th><th>Colpi</th><th>Vinti</th><th>R medio</th></tr>' +
+    [['▲ Lunghi', cal.lunghi], ['▼ Corti', cal.corti]].map(function(r){
+      return '<tr><td class="t">' + r[0] + '</td><td>' + r[1].n + '</td><td>' + (r[1].n ? fmt(r[1].pVince * 100, 0) + '%' : '—') + '</td><td class="' + (r[1].rMedio >= 0 ? 'pos' : 'neg') + '">' + (r[1].n ? erre(r[1].rMedio) : '—') + '</td></tr>';
+    }).join('') + '</table></div>';
+
+  var mercati = S.cfg.lista.filter(function(e){ return S.bt[e] && S.bt[e].n; }).sort(function(a, b){ return S.bt[b].rMedio - S.bt[a].rMedio; });
+  h += '<div class="h2">Per mercato</div><p class="lede">Dove le regole hanno funzionato e dove no. Attento a non scegliere i mercati da qui: con pochi colpi ' +
+    'chi sta in cima ci sta anche per fortuna.</p><div class="card" style="padding:6px 14px"><table class="tab-d"><tr><th>Mercato</th><th>Colpi</th><th>Vinti</th><th>R medio</th><th>Peggio</th></tr>' +
+    mercati.map(function(e){
+      var b = S.bt[e];
+      return '<tr onclick="scegli(\'' + e + '\')" style="cursor:pointer"><td class="t">' + esc(nomeDi(e)) + '</td><td>' + b.n + '</td><td>' + fmt(b.pVince * 100, 0) + '%</td>' +
+        '<td class="' + (b.rMedio >= 0 ? 'pos' : 'neg') + '">' + erre(b.rMedio) + '</td><td>' + fmt(-b.maxDD, 1) + 'R</td></tr>';
+    }).join('') + '</table></div>';
+
+  h += '<div class="h2">Come e\' misurato</div><div class="card"><ul class="elenco" style="margin:0">' +
+    '<li>Il segnale si legge sulla candela chiusa, si entra all\'apertura della successiva. Nessun indicatore guarda avanti: lo verifica un test.</li>' +
+    '<li>Si paga lo spread vero di ogni candela di Capital.com: si compra all\'ask, si vende al bid.</li>' +
+    '<li>Se in una candela si toccano sia lo stop sia l\'obiettivo, si assume lo stop. Se il mercato apre oltre lo stop, si esce all\'apertura, non allo stop.</li>' +
+    '<li>Le notti si pagano: ' + (S.cfg.stile === 'swing' ? 'il tasso di Capital.com, o una stima prudente se non lo manda.' : 'in intraday non ce ne sono, si chiude a fine giornata.') + '</li>' +
+    '<li>I pesi del punteggio non sono stati ottimizzati su questi dati, apposta: un punteggio tarato sul passato vince sempre sul passato.</li>' +
+    '<li>R e\' il rischio del colpo: +1R vuol dire aver guadagnato quanto si rischiava.</li></ul></div>';
+  h += '<div class="h2">Cosa il motore non sa</div><div class="card"><ul class="elenco" style="margin:0">' +
+    '<li><b>Le trimestrali.</b> Capital.com non le passa: un titolo puo\' aprire il giorno dopo i conti con un buco del 15%, ben oltre lo stop. Controllale prima di entrare.</li>' +
+    '<li><b>Le notizie.</b> Il motore legge prezzi, non giornali.</li>' +
+    '<li><b>Lo slittamento.</b> Uno stop a mercato veloce esce peggio del livello scritto. Nel backtest c\'e\' solo per i buchi d\'apertura.</li>' +
+    '<li><b>La folla.</b> Il sentiment dei clienti entra nel punteggio di oggi, ma non nel backtest: la sua storia non esiste.</li>' +
+    '<li><b>Il futuro.</b> Una regola che ha funzionato non e\' una regola che funzionera\'. Con la leva, un periodo storto costa il doppio.</li></ul></div>';
+  return h;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PONTE (impostazioni)
+   ══════════════════════════════════════════════════════════════ */
+function tabPonte(){
+  var h = '', c = S.cfg;
+  h += '<div class="h2">Capital.com</div><div class="card">';
+  if(S.modo === 'vero' && S.ponte){
+    h += '<div class="fila" style="align-items:center;margin-bottom:10px"><span class="chip ok">Collegato</span>' +
+      '<span class="chip ' + (S.ponte.demo ? 'acc' : 'ko') + '">' + (S.ponte.demo ? 'Conto demo' : 'Conto reale') + '</span>' +
+      (S.conto ? '<span class="piccolo num">' + esc(S.conto.nome || '') + ' · saldo ' + soldi(S.conto.saldo || 0) + '</span>' : '') + '</div>';
+  } else {
+    h += '<p class="piccolo" style="margin:0 0 12px">Adesso stai guardando <b>dati d\'esempio</b>. Per i tuoi mercati e le tue posizioni serve il ponte: un piccolo programma su Cloudflare ' +
+      'che tiene le tue chiavi di Capital.com e passa all\'app solo quello che serve, in sola lettura. Si monta in un quarto d\'ora: istruzioni in ' +
+      '<a href="https://github.com/w8997wnwy5-collab/capital_com/blob/main/server/COME-SI-ACCENDE.md" target="_blank" rel="noopener">server/COME-SI-ACCENDE.md</a>.</p>';
+  }
+  h += '<div class="campo"><label for="ponte">Indirizzo del ponte</label><input id="ponte" type="url" autocomplete="off" placeholder="https://mirino.tuonome.workers.dev" value="' + esc(c.ponte) + '"></div>' +
+    '<div class="campo"><label for="chiaveP">Codice d\'accesso (la CHIAVE del Worker)</label><input id="chiaveP" type="password" autocomplete="off" value="' + esc(c.chiave) + '"></div>' +
+    '<div class="fila"><button class="btn acc" onclick="collega()">' + (S.modo === 'vero' ? 'Ricollega' : 'Collega') + '</button>' +
+    (S.modo === 'vero' ? '<button class="btn" onclick="usaEsempio()">Torna all\'esempio</button>' : '') + '</div>' +
+    (S.erroreCollega ? '<div class="nota warn">' + esc(S.erroreCollega) + '</div>' : '') + '</div>';
+
+  if(S.modo === 'vero' && S.ponte){
+    h += '<div class="h2">Avvisi su Telegram</div><div class="card">' +
+      (S.ponte.telegram && S.ponte.memoria
+        ? '<p class="piccolo" style="margin:0 0 10px">Accesi. Ogni minuto il ponte guarda le posizioni aperte e ti scrive quando il consiglio cambia.</p>'
+        : '<p class="piccolo" style="margin:0 0 10px">' + (!S.ponte.telegram ? 'Mancano i segreti TELEGRAM_TOKEN e TELEGRAM_CHAT nel Worker. ' : '') +
+          (!S.ponte.memoria ? 'Manca il deposito MEMORIA (KV) collegato al Worker. ' : '') + 'Istruzioni nella guida del ponte.</p>') +
+      '<button class="btn" onclick="provaTelegram()"' + (S.ponte.telegram ? '' : ' disabled') + '>Manda un messaggio di prova</button></div>';
+  }
+
+  h += '<div class="h2">Notifiche sul telefono</div><div class="card"><p class="piccolo" style="margin:0 0 10px">Funzionano finche\' l\'app e\' aperta o appena chiusa. ' +
+    'Su iPhone servono l\'app aggiunta alla schermata Home e iOS 16.4 o piu\'. Per gli avvisi sicuri, Telegram.</p>' +
+    '<button class="btn" onclick="chiediNotifiche()">' + ('Notification' in window && Notification.permission === 'granted' ? 'Notifiche accese' : 'Accendi le notifiche') + '</button></div>';
+
+  h += '<div class="h2">La lista<span class="r">' + c.lista.length + ' mercati</span></div><div class="card">' +
+    '<div class="mini" style="margin-bottom:12px">' + c.lista.map(function(e){
+      return '<span class="chip">' + esc(nomeDi(e)) + ' <span onclick="togliMercato(\'' + esc(e) + '\')" style="cursor:pointer;color:var(--warn);font-weight:700" aria-label="togli">×</span></span>';
+    }).join('') + '</div>' +
+    '<div class="campo" style="margin-bottom:6px"><label for="cerca">Cerca un mercato su Capital.com</label><input id="cerca" type="search" placeholder="Ferrari, Nasdaq, oro…" value="' + esc(S.cerca.testo) + '" oninput="cerca(this.value)"></div>' +
+    risultatiRicerca() +
+    '<div class="campo" style="margin-top:12px"><label for="rif">Indice di riferimento (vento e forza relativa)</label><select id="rif" onchange="impostaRiferimento(this.value)">' +
+    ['US500', 'US100', 'US30', 'DE40', 'IT40', 'UK100'].map(function(e){ return '<option' + (c.riferimento === e ? ' selected' : '') + '>' + e + '</option>'; }).join('') + '</select></div>' +
+    '<button class="btn" onclick="ripristinaLista()">Torna alla lista di partenza</button></div>';
+
+  h += '<div class="h2">Regole</div><div class="card"><ul class="elenco" style="margin:0">' +
+    '<li>Stop iniziale a ' + M.REGOLE.stopAtr + ' ATR. R = la distanza fra entrata e stop.</li>' +
+    '<li>A +' + M.REGOLE.pareggioDa + 'R lo stop va a pareggio. A +' + M.REGOLE.tp1 + 'R si chiude meta\'. A +' + M.REGOLE.tp2 + 'R il resto.</li>' +
+    '<li>Dopo il primo incasso lo stop insegue il prezzo a ' + M.REGOLE.trailAtr + ' ATR dal massimo.</li>' +
+    '<li>Se il segnale si gira contro (grado C dall\'altra parte) si esce, anche in guadagno.</li>' +
+    '<li>Tempo massimo: ' + M.STILI.swing.maxBarre + ' giorni in swing, ' + M.STILI.intraday.maxBarre + ' ore in intraday.</li></ul></div>';
+
+  h += '<div class="h2">Questo telefono</div><div class="card"><p class="piccolo" style="margin:0 0 10px">Mirino ' + VERSIONE + '. Budget, lista, posizioni a mano e libro ' +
+    'stanno solo qui, nel browser. Le chiavi di Capital.com no: stanno nel ponte.</p><button class="btn ko" onclick="cancellaTutto()">Cancella i dati di questo telefono</button></div>';
+  return h;
+}
+
+function risultatiRicerca(){
+  var r = S.cerca;
+  if(r.inCorso) return '<p class="piccolo">Cerco…</p>';
+  if(!r.risultati) return '';
+  if(!r.risultati.length) return '<p class="piccolo">Niente con questo nome.</p>';
+  return '<div class="mini">' + r.risultati.slice(0, 14).map(function(m){
+    var dentro = S.cfg.lista.indexOf(m.epic) >= 0;
+    return '<span class="chip' + (dentro ? ' acc' : '') + '" onclick="aggiungiMercato(\'' + esc(m.epic) + '\')">' + esc(m.instrumentName || m.epic) +
+      ' <span class="num muto">' + esc(m.epic) + '</span>' + (dentro ? ' ✓' : ' +') + '</span>';
+  }).join('') + '</div>';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   FOGLI
+   ══════════════════════════════════════════════════════════════ */
+function foglioHTML(){
+  var f = S.foglio;
+  if(!f) return '';
+  var dentro = '';
+  if(f.tipo === 'entrato' || f.tipo === 'mano'){
+    var d = f.dati, opzioni = epicsVivi().filter(function(e){ return S.mercati[e]; });
+    dentro = '<h3>' + (f.tipo === 'entrato' ? 'Sono entrato' : 'Una posizione a mano') + '</h3>' +
+      '<p class="piccolo" style="margin:0 0 14px">' + (f.tipo === 'entrato'
+        ? (S.modo === 'vero' ? 'Non la vedo ancora su Capital.com. Se l\'hai aperta li\', comparira\' da sola: chiudi pure. Altrimenti salvala qui.' : 'Controlla prezzo e quantita\': sono quelli del piano, al prezzo di adesso.')
+        : 'Per una posizione aperta altrove, o per provare. La sorveglio come le altre.') + '</p>' +
+      '<div class="campo"><label for="f-epic">Mercato</label><select id="f-epic" onchange="campoFoglio(\'epic\', this.value)">' +
+      opzioni.map(function(e){ return '<option value="' + esc(e) + '"' + (d.epic === e ? ' selected' : '') + '>' + esc(nomeDi(e)) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="seg" style="margin-bottom:12px"><button class="' + (d.dir > 0 ? 'on' : '') + '" onclick="campoFoglio(\'dir\', 1)">▲ Lungo</button>' +
+      '<button class="' + (d.dir < 0 ? 'on' : '') + '" onclick="campoFoglio(\'dir\', -1)">▼ Corto</button></div>' +
+      '<div class="fila"><div class="campo" style="flex:1"><label for="f-prezzo">Prezzo d\'entrata</label><input id="f-prezzo" type="number" inputmode="decimal" step="any" value="' + (d.entrata || '') + '" oninput="campoFoglio(\'entrata\', this.value, true)"></div>' +
+      '<div class="campo" style="flex:1"><label for="f-dim">Quantita\'</label><input id="f-dim" type="number" inputmode="decimal" step="any" value="' + (d.dim || '') + '" oninput="campoFoglio(\'dim\', this.value, true)"></div></div>' +
+      '<div class="fila"><div class="campo" style="flex:1"><label for="f-stop">Stop</label><input id="f-stop" type="number" inputmode="decimal" step="any" value="' + (d.stop || '') + '" oninput="campoFoglio(\'stop\', this.value, true)"></div>' +
+      '<div class="campo" style="flex:1"><label for="f-quando">Quando</label><input id="f-quando" type="datetime-local" value="' + esc(d.quandoTesto) + '" oninput="campoFoglio(\'quandoTesto\', this.value, true)"></div></div>' +
+      '<div class="fila"><button class="btn acc" onclick="salvaPosizione()">Salva</button><button class="btn" onclick="chiudiFoglio()">Annulla</button></div>';
+  } else if(f.tipo === 'chiudi'){
+    dentro = '<h3>Ho chiuso</h3><p class="piccolo" style="margin:0 0 14px">A che prezzo? Il risultato finisce nel libro.</p>' +
+      '<div class="campo"><label for="f-uscita">Prezzo d\'uscita</label><input id="f-uscita" type="number" inputmode="decimal" step="any" value="' + (f.dati.uscita || '') + '" oninput="campoFoglio(\'uscita\', this.value, true)"></div>' +
+      '<div class="fila"><button class="btn acc" onclick="confermaChiusura()">Chiudi la posizione</button><button class="btn" onclick="chiudiFoglio()">Annulla</button></div>';
+  }
+  return '<div class="velo" onclick="if(event.target===this)chiudiFoglio()"><div class="foglio"><div class="maniglia"></div>' + dentro + '</div></div>';
+}
+
+function campoFoglio(k, v, numero){
+  if(!S.foglio) return;
+  if(numero && k !== 'quandoTesto') v = parseFloat(String(v).replace(',', '.'));
+  S.foglio.dati[k] = v;
+  if(k === 'epic' || k === 'dir'){
+    var d = S.foglio.dati, px = prezzoVivo(d.epic);
+    if(px) d.entrata = +(d.dir > 0 ? px.ask : px.bid).toFixed(M.decimaliPer(px.bid));
+    var p = pianoDi(d.epic, d.dir);
+    if(p){ d.dim = p.dim; d.stop = +p.stop.toFixed(M.decimaliPer(p.stop)); }
+    render();
+  }
+}
+function chiudiFoglio(){ S.foglio = null; render(); }
+function testoQuando(ms){
+  var d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000);
+  return d.toISOString().slice(0, 16);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   AZIONI
+   ══════════════════════════════════════════════════════════════ */
+function vai(t){ S.tab = t; history.replaceState(null, '', '#' + t); render(); window.scrollTo(0, 0); if(t === 'radar') caricaScoperte(); }
+function scegli(ep){ if(!ep) return; S.scelto = ep; vai('colpo'); }
+
+function impostaBudget(v){
+  var x = parseFloat(String(v).replace(',', '.'));
+  S.cfg.budget = x > 0 ? x : null;
+  salvaCfg();
+  render();
+}
+function impostaProfilo(k){
+  S.cfg.profilo = k; salvaCfg();
+  analizzaTutto(); render();
+}
+function impostaStile(k){
+  if(S.cfg.stile === k) return;
+  S.cfg.stile = k; salvaCfg();
+  S.cs = {}; S.ct = {};
+  /* il ponte deve leggere le posizioni aperte con lo stesso stile */
+  var segui = leggi(CHIAVI.segui, {});
+  Object.keys(segui).forEach(function(id){ segui[id].stile = k; avvisaPonte(id, segui[id]); });
+  scrivi(CHIAVI.segui, segui);
+  S.stato = 'carico'; carica(true);
+}
+function impostaRiferimento(e){ S.cfg.riferimento = e; salvaCfg(); S.stato = 'carico'; carica(true); }
+
+function sonoEntrato(ep){
+  var p = pianoDi(ep);
+  if(!p) return;
+  var apri = function(){
+    var px = prezzoVivo(ep);
+    S.foglio = { tipo: 'entrato', dati: { epic: ep, dir: p.dir, entrata: +(px ? (p.dir > 0 ? px.ask : px.bid) : p.entrata).toFixed(M.decimaliPer(p.entrata)),
+      dim: p.dim, stop: +p.stop.toFixed(M.decimaliPer(p.stop)), quandoTesto: testoQuando(Date.now()), R: p.R, punti: (S.analisi[ep] || {}).punti } };
+    render();
+  };
+  if(S.modo !== 'vero'){ apri(); return; }
+  /* prima si guarda se Capital.com la vede gia' */
+  mostraAvviso('Guardo su Capital.com…', 'Cerco la posizione appena aperta.');
+  aggiornaPosizioni(false).then(function(){
+    var trovata = posizioniTutte().filter(function(x){ return x.capital && x.epic === ep && x.dir === p.dir && Date.now() - x.aperta < 3 * 3600000; })[0];
+    if(trovata){
+      var segui = leggi(CHIAVI.segui, {});
+      var imp = Object.assign(segui[trovata.id] || {}, { puntiEntrata: (S.analisi[ep] || {}).punti, stile: S.cfg.stile });
+      if(trovata.stopBroker == null){ imp.R = p.R; imp.stopMentale = p.stop; delete imp.stopIniziale; }
+      segui[trovata.id] = imp; scrivi(CHIAVI.segui, segui); avvisaPonte(trovata.id, imp);
+      mostraAvviso('Trovata', nomeDi(ep) + ' ' + verso(p.dir).toLowerCase() + ': ' + fmt(trovata.dim, trovata.dim % 1 ? 2 : 0) + ' a ' + prezzo(trovata.entrata) + ' alle ' + ora(trovata.aperta) + '. La sorveglio io.');
+      vai('gioco');
+    } else apri();
+  });
+}
+
+function apriManuale(){
+  var ep = S.scelto || S.cfg.lista[0], an = S.analisi[ep] || {}, dir = an.dir || 1, px = prezzoVivo(ep), p = pianoDi(ep, dir);
+  S.foglio = { tipo: 'mano', dati: { epic: ep, dir: dir, entrata: px ? +(dir > 0 ? px.ask : px.bid).toFixed(M.decimaliPer(px.bid)) : null,
+    dim: p ? p.dim : null, stop: p ? +p.stop.toFixed(M.decimaliPer(p.stop)) : null, quandoTesto: testoQuando(Date.now()) } };
+  render();
+}
+
+function salvaPosizione(){
+  var d = S.foglio.dati;
+  if(!(d.entrata > 0) || !(d.dim > 0)){ mostraAvviso('Manca qualcosa', 'Servono prezzo d\'entrata e quantita\'.'); return; }
+  var aperta = d.quandoTesto ? new Date(d.quandoTesto).getTime() : Date.now();
+  if(!isFinite(aperta)) aperta = Date.now();
+  var stopOk = d.stop > 0 && (d.stop - d.entrata) * d.dir < 0;
+  var pos = { id: 'm' + Date.now().toString(36), epic: d.epic, nome: nomeDi(d.epic), dir: d.dir, entrata: d.entrata, dim: d.dim, aperta: aperta,
+              stop: stopOk ? d.stop : null, stopIniziale: stopOk ? d.stop : undefined, R: stopOk ? undefined : d.R,
+              puntiEntrata: d.punti != null ? d.punti : (S.analisi[d.epic] || {}).punti, valuta: (S.mercati[d.epic] || {}).valuta,
+              passo: (S.mercati[d.epic] || {}).passo };
+  var lista = leggi(CHIAVI.mano, []);
+  lista.push(pos);
+  scrivi(CHIAVI.mano, lista);
+  avvisaPonte(pos.id, { stile: S.cfg.stile, R: pos.R, stopIniziale: pos.stopIniziale, puntiEntrata: pos.puntiEntrata, passo: pos.passo },
+              { manuale: true, epic: pos.epic, nome: pos.nome, dir: pos.dir, entrata: pos.entrata, dim: pos.dim, aperta: pos.aperta, stop: pos.stop, valuta: pos.valuta });
+  S.foglio = null;
+  S.verdetti[pos.id] = null;
+  vai('gioco');
+  mostraAvviso('Ti seguo', nomeDi(pos.epic) + ' ' + verso(pos.dir).toLowerCase() + ' da ' + prezzo(pos.entrata) + '. Ti dico io quando uscire.');
+}
+
+function trovaPosizione(id){ return posizioniTutte().filter(function(p){ return p.id === id; })[0]; }
+
+function segna(id, cosa){
+  var p = trovaPosizione(id);
+  if(!p) return;
+  var c = consiglioDi(p), cambi = {};
+  if(cosa === 'parziale'){
+    cambi.parziale = true;
+    if(c) cambi[p.manuale ? 'stop' : 'stopMentale'] = c.stopRegola;
+    /* a mano: la meta' chiusa va nel libro, la posizione resta con l'altra.
+       Su Capital.com la meta' e' una posizione a parte che si chiude da sola
+       al take profit, e nel libro ci finisce comunque. */
+    if(p.manuale && c){
+      var resta = M.giuAlPasso(p.dim / 2, p.passo || 0.01);
+      if(resta > 0 && resta < p.dim){
+        registraChiusura(Object.assign({}, p, { dim: p.dim - resta }), c.uscita, 'Meta\' incassata');
+        cambi.dim = resta;
+      }
+    }
+  }
+  if(cosa === 'stop' && c) cambi[p.manuale ? 'stop' : 'stopMentale'] = c.stopRegola;
+  if(cosa === 'rinforzata'){ cambi.rinforzata = true; if(p.manuale){ var agg = M.giuAlPasso(p.dim / 2, p.passo || 0.01); var px = (S.mercati[p.epic] || {}); var nuovo = p.dir > 0 ? px.ask : px.bid;
+    if(agg > 0 && nuovo > 0){ cambi.entrata = (p.entrata * p.dim + nuovo * agg) / (p.dim + agg); cambi.dim = p.dim + agg; cambi.R = p.R || Math.abs(p.entrata - (p.stopIniziale || p.entrata)); } } }
+  if(p.manuale) salvaManuale(id, cambi);
+  else { var segui = leggi(CHIAVI.segui, {}); segui[id] = Object.assign(segui[id] || {}, cambi); scrivi(CHIAVI.segui, segui); }
+  var q = trovaPosizione(id);
+  avvisaPonte(id, { stile: S.cfg.stile, R: q.R, stopIniziale: q.stopIniziale, parziale: q.parziale, rinforzata: q.rinforzata, puntiEntrata: q.puntiEntrata, passo: q.passo },
+              p.manuale ? { manuale: true, epic: q.epic, nome: q.nome, dir: q.dir, entrata: q.entrata, dim: q.dim, aperta: q.aperta, stop: q.stop, valuta: q.valuta } : null);
+  S.verdetti[id] = null;
+  render();
+}
+
+function apriChiusura(id){
+  var p = trovaPosizione(id), mk = S.mercati[p.epic] || {};
+  S.foglio = { tipo: 'chiudi', id: id, dati: { uscita: p.dir > 0 ? mk.bid : mk.ask } };
+  render();
+}
+function confermaChiusura(){
+  var f = S.foglio, p = trovaPosizione(f.id);
+  if(!p || !(f.dati.uscita > 0)) return;
+  registraChiusura(p, f.dati.uscita, 'Chiusa a mano');
+  scrivi(CHIAVI.mano, leggi(CHIAVI.mano, []).filter(function(m){ return m.id !== f.id; }));
+  if(S.modo === 'vero') chiediPonte('/api/segui/' + encodeURIComponent(f.id), { metodo: 'DELETE' }).catch(function(){});
+  S.foglio = null;
+  render();
+}
+
+function collega(){
+  var url = (document.getElementById('ponte').value || '').trim(), chiave = (document.getElementById('chiaveP').value || '').trim();
+  /* https sempre, tranne per un ponte di prova sul proprio computer */
+  if(url && !/^https:\/\//.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(url)) url = 'https://' + url.replace(/^http:\/\//, '');
+  S.erroreCollega = null;
+  if(!url || !chiave){ S.erroreCollega = 'Servono indirizzo e codice.'; render(); return; }
+  var vecchio = { ponte: S.cfg.ponte, chiave: S.cfg.chiave };
+  S.cfg.ponte = url; S.cfg.chiave = chiave;
+  chiediPonte('/api/stato').then(function(st){
+    if(!st.ok) throw new Error(st.problema || 'Il ponte risponde, Capital.com no.');
+    S.cfg.esempio = false; salvaCfg();
+    S.modo = 'vero'; S.mercati = {}; S.cs = {}; S.ct = {}; S.capPos = []; S.capPosCaricate = false; S.cambi = {};
+    S.scoperte = null; S.verdetti = {};
+    mostraAvviso('Collegato', (st.demo ? 'Conto demo' : 'Conto reale') + (st.conto ? ' · ' + st.conto.nome : '') + '. Carico i tuoi mercati.');
+    S.stato = 'carico'; carica(true);
+  }).catch(function(e){
+    S.cfg.ponte = vecchio.ponte; S.cfg.chiave = vecchio.chiave;
+    S.erroreCollega = e.message; render();
+  });
+}
+function usaEsempio(){
+  S.cfg.esempio = true; salvaCfg();
+  S.modo = 'esempio'; S.mercati = {}; S.cs = {}; S.ct = {}; S.capPos = []; S.capPosCaricate = false; S.cambi = {}; S.scoperte = null; S.verdetti = {};
+  S.stato = 'carico'; carica(true);
+}
+function provaTelegram(){
+  chiediPonte('/api/telegram/prova', { metodo: 'POST' }).then(function(){ mostraAvviso('Mandato', 'Guarda su Telegram.'); },
+    function(e){ mostraAvviso('Telegram non risponde', e.message); });
+}
+function chiediNotifiche(){
+  if(!('Notification' in window)){ mostraAvviso('Non qui', 'Questo browser non fa notifiche. Su iPhone: aggiungi l\'app alla schermata Home.'); return; }
+  Notification.requestPermission().then(function(){ render(); });
+}
+
+var timerCerca = null;
+function cerca(t){
+  S.cerca.testo = t;
+  clearTimeout(timerCerca);
+  if(t.trim().length < 2){ S.cerca.risultati = null; render(); return; }
+  timerCerca = setTimeout(function(){
+    S.cerca.inCorso = true; render();
+    chiedi('markets', { searchTerm: t.trim() }).then(function(d){
+      S.cerca.risultati = (d.markets || []).filter(function(m){ return m.instrumentType !== 'CURRENCIES'; });
+    }, function(){ S.cerca.risultati = []; }).then(function(){ S.cerca.inCorso = false; render(); });
+  }, 350);
+}
+function aggiungiMercato(ep){
+  if(S.cfg.lista.indexOf(ep) >= 0){ scegli(ep); return; }
+  S.cfg.lista.push(ep); salvaCfg();
+  mostraAvviso('Aggiunto', ep + ': leggo le candele.');
+  caricaMercati([ep]).then(caricaCambi).then(function(){ return Promise.all([caricaCandele(ep), caricaFolla([ep])]); }).then(function(){
+    analizzaTutto(); render();
+  });
+}
+function togliMercato(ep){
+  S.cfg.lista = S.cfg.lista.filter(function(e){ return e !== ep; }); salvaCfg();
+  analizzaTutto(); render();
+}
+function ripristinaLista(){ S.cfg.lista = LISTA_BASE.slice(); salvaCfg(); S.stato = 'carico'; carica(true); }
+function cancellaTutto(){
+  if(!confirm('Cancello budget, lista, posizioni a mano e libro da questo telefono?')) return;
+  Object.keys(CHIAVI).forEach(function(k){ try{ localStorage.removeItem(CHIAVI[k]); }catch(e){} });
+  location.reload();
+}
+function aggiorna(){ if(S.stato === 'pronto') carica(true); }
+
+/* ══════════════════════════════════════════════════════════════
+   DISEGNO
+   ══════════════════════════════════════════════════════════════ */
+var MIRINO_SVG = '<circle cx="50" cy="50" r="30" fill="none" stroke="currentColor" stroke-width="6"/>' +
+  '<path d="M50 6v22M50 72v22M6 50h22M72 50h22" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle cx="50" cy="50" r="5" fill="currentColor"/>';
+
+var TABS = [
+  { k: 'radar', n: 'Radar', p: 'M12 3a9 9 0 1 0 9 9M12 7a5 5 0 1 0 5 5M12 12l7-7' },
+  { k: 'colpo', n: 'Colpo', p: 'M12 2v4M12 18v4M2 12h4M18 12h4M12 6a6 6 0 1 0 0 12a6 6 0 1 0 0-12M12 11v2' },
+  { k: 'gioco', n: 'In gioco', p: 'M3 12h4l3-8 4 16 3-8h4' },
+  { k: 'precisione', n: 'Precisione', p: 'M4 20V10M10 20V4M16 20v-7M22 20H2' },
+  { k: 'ponte', n: 'Ponte', p: 'M2 17h20M5 17v-5a7 7 0 0 1 14 0v5M9 17v-4M15 17v-4' }
+];
+var TITOLI = { radar: 'Dove giocare', colpo: 'Il colpo', gioco: 'In gioco', precisione: 'Precisione', ponte: 'Il ponte' };
+
+function sottotitolo(){
+  var st = M.STILI[S.cfg.stile].nome;
+  if(S.tab === 'ponte') return S.modo === 'vero' ? (S.ponte && S.ponte.demo ? 'Capital.com · demo' : 'Capital.com · conto reale') : 'Dati d\'esempio';
+  if(S.tab === 'gioco') return posizioniTutte().length + ' aperte · aggiornato ' + ora(Date.now());
+  var n = S.cfg.lista.length;
+  return n + ' mercati · ' + st + ' · ' + M.PROFILI[S.cfg.profilo].nome + ' · ' + ora(S.ultimoGiro || Date.now());
+}
+
+function schermataCarico(){
+  return '<div class="carico"><svg viewBox="0 0 100 100" style="color:var(--accent)"><g class="giro">' + MIRINO_SVG + '</g></svg>' +
+    '<div style="font-size:22px;font-weight:700;letter-spacing:-.5px">Mirino</div>' +
+    '<div class="bar"><i style="width:' + Math.round(S.avanzamento * 100) + '%"></i></div><div class="fase">' + esc(S.fase) + '</div></div>';
+}
+function schermataErrore(){
+  return '<div class="wrap" style="padding-top:calc(var(--safet) + 40px)"><div class="card"><div class="vuoto"><b>Non riesco a leggere i mercati</b>' + esc(S.errore || '') + '</div>' +
+    '<div class="fila"><button class="btn acc" onclick="S.stato=\'carico\';carica(true)">Riprova</button>' +
+    (S.modo === 'vero' ? '<button class="btn" onclick="usaEsempio()">Usa i dati d\'esempio</button>' : '') + '</div></div></div>';
+}
+/* La prima domanda, l'unica che l'app fa: quanto vuoi mettere. */
+function schermataBenvenuto(){
+  return '<div class="benvenuto"><svg viewBox="0 0 100 100" width="64" height="64" style="color:var(--accent)">' + MIRINO_SVG + '</svg>' +
+    '<h1>Leva alta,<br>mira stretta.</h1><p class="tag">Leggo i mercati di Capital.com, ti dico dove entrare, quanto mettere e quando uscire. Prima, una domanda sola.</p>' +
+    '<div class="h2" style="margin:0 0 4px">Quanto vuoi mettere in gioco?</div>' +
+    '<div class="budget"><input id="budget0" type="number" inputmode="decimal" min="0" step="50" placeholder="2000"><span>' + valutaConto() + '</span></div>' +
+    '<p class="piccolo" style="margin:-4px 0 18px">La parte del conto che decidi di rischiare. Profilo di partenza: <b>Aggressivo</b>, medio-alto: 4% del budget a colpo. Si cambia quando vuoi.</p>' +
+    '<button class="btn acc" onclick="var v=document.getElementById(\'budget0\').value;if(parseFloat(v)>0){impostaBudget(v);}">Si parte</button>' +
+    '<p class="piccolo" style="margin-top:16px;text-align:center">Il trading a leva puo\' far perdere piu\' di quanto pensi, in fretta. Mirino non garantisce niente: misura, e te lo dice.</p></div>';
+}
+
+function render(){
+  var app = document.getElementById('app');
+  var att = document.activeElement, fuoco = null;
+  if(att && att.id && (att.tagName === 'INPUT' || att.tagName === 'SELECT')){
+    /* si salva anche QUELLO CHE HAI SCRITTO, non solo dove stava il cursore:
+       ridisegnare ricostruisce il campo da capo */
+    fuoco = { id: att.id, testo: att.value, a: null, b: null };
+    try{ fuoco.a = att.selectionStart; fuoco.b = att.selectionEnd; }catch(e){}
+  }
+  disegna(app);
+  if(fuoco){
+    var rif = document.getElementById(fuoco.id);
+    if(rif && rif !== document.activeElement){
+      try{
+        if(fuoco.testo != null && rif.value !== fuoco.testo) rif.value = fuoco.testo;
+        rif.focus({ preventScroll: true });
+        if(fuoco.a != null) rif.setSelectionRange(fuoco.a, fuoco.b);
+      }catch(e){}
+    }
+  }
+}
+
+function disegna(app){
+  S.grafici = {};
+  if(S.stato === 'carico'){ app.innerHTML = schermataCarico(); return; }
+  if(S.stato === 'errore'){ app.innerHTML = schermataErrore(); return; }
+  if(!S.cfg.budget && S.tab !== 'ponte'){ app.innerHTML = schermataBenvenuto(); return; }
+  var corpo = S.tab === 'colpo' ? tabColpo() : S.tab === 'gioco' ? tabGioco() : S.tab === 'precisione' ? tabPrecisione() :
+              S.tab === 'ponte' ? tabPonte() : tabRadar();
+  var modo = S.modo === 'vero' ? (S.ponte && S.ponte.demo ? '<span class="modo demo">demo</span>' : '<span class="modo vero">reale</span>') : '<span class="modo">esempio</span>';
+  var h = '<div class="top"><div class="ttl"><h1>' + TITOLI[S.tab] + modo + '</h1><div class="sub">' + esc(sottotitolo()) + '</div></div>' +
+    '<button class="ico' + (S.aggiornando ? ' gira' : '') + '" onclick="aggiorna()" aria-label="Aggiorna">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg></button></div>';
+  h += '<div class="wrap">' + corpo + '</div>';
+  var u = urgenti();
+  h += '<div class="tabs">' + TABS.map(function(t){
+    return '<button class="tab ' + (S.tab === t.k ? 'on' : '') + '" onclick="vai(\'' + t.k + '\')">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="' + t.p + '"/></svg>' +
+      '<span>' + t.n + '</span>' + (t.k === 'gioco' && u ? '<i class="pallino">' + u + '</i>' : '') + '</button>';
+  }).join('') + '</div>';
+  h += foglioHTML();
+  app.innerHTML = h;
+}
+
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && S.foglio) chiudiFoglio(); });
+if('serviceWorker' in navigator && location.protocol.indexOf('http') === 0){
+  navigator.serviceWorker.register('sw.js').catch(function(){});
+}
+caricaCfg();
+var ancora = (location.hash || '').slice(1);
+if(TITOLI[ancora]) S.tab = ancora;
+carica(false);
+</script>
+</body>
+</html>
