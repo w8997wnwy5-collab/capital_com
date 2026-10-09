@@ -7,9 +7,11 @@ pubblico, non finisce niente.
 Serve un quarto d'ora. Due strade per la stessa cosa: la **A** si fa tutta dal
 browser, la **B** è per chi ha già un terminale aperto.
 
-> **Sola lettura.** Il ponte sa leggere prezzi, mercati, posizioni e conto. Non
-> sa aprire, chiudere o modificare niente: nel codice non c'è una riga che lo
-> faccia. Mirino ti dice cosa fare, il dito sul tasto resta il tuo.
+> **Chi può scrivere sul conto.** Quello che arriva da fuori (l'app, il
+> browser) può solo leggere: prezzi, mercati, posizioni, conto. Le uniche
+> scritture verso Capital.com — aprire, spostare lo stop, chiudere — le fa il
+> **robot**, e solo quando lo accendi tu dalla scheda *Robot* dell'app. Non c'è
+> un indirizzo del ponte che inoltri un ordine scelto da fuori.
 
 ---
 
@@ -132,6 +134,37 @@ node tools/cuci_worker.js && cd server && npx wrangler deploy
 
 ---
 
+# Il robot
+
+Va nel cron di ogni minuto, come gli avvisi: servono il deposito `MEMORIA` e
+l'orologio `* * * * *` (A6). Telegram non è obbligatorio, ma senza non ti dice
+cosa fa e non lo puoi fermare da lì.
+
+Si accende dalla scheda **Robot** dell'app: scegli la perdita massima (dall'avvio)
+e quante posizioni al massimo, poi **Avvia**. Quando lo accendi, il ponte collega
+anche i comandi di Telegram:
+
+| Comando | Cosa fa |
+|---|---|
+| `/stato` | acceso o spento, risultato dall'avvio, le sue posizioni |
+| `/stop` | non apre più niente; le posizioni aperte le porta a fine con le loro regole |
+| `/chiudi` | si ferma e chiude subito tutte le sue posizioni |
+
+Funzionano solo dalla tua chat (`TELEGRAM_CHAT`). Il ponte se ne accorge da un
+percorso segreto e da un'intestazione segreta, ricavati dalla `CHIAVE`: se cambi
+la `CHIAVE`, riaccendi il robot dall'app per ricollegarli.
+
+Variabili facoltative (tipo Text), per chi ha il piano a pagamento di Cloudflare:
+
+| nome | predefinito | cosa cambia |
+|---|---|---|
+| `ROBOT_MERCATI_PER_GIRO` | `1` | quanti mercati della lista guarda a ogni minuto (fino a 5) |
+| `ROBOT_CALCOLI` | `4` | quanti mercati può ricalcolare da capo in un giro |
+
+Sul piano gratuito ogni giro ha 10 ms di calcolo: per questo un mercato al minuto.
+
+---
+
 # Gli avvisi su Telegram
 
 Con l'app aperta, i consigli li vedi sullo schermo. Con l'app in tasca il
@@ -197,11 +230,17 @@ collegata almeno una volta. Si spengono da **Ponte › Solo uscite**.
 - **«Credenziali giuste, ma sul server demo non hai un conto attivo»** (`error.null.accountId`):
   Capital.com ti fa entrare ma non trova un conto su quel server. Apri il conto
   demo su Capital.com, oppure aggiungi la variabile `CAPITAL_DEMO` = `0` (tipo
-  Text) per collegare il conto reale. Il ponte resta in sola lettura.
+  Text) per collegare il conto reale.
 - **Entri su Capital.com con Apple o Google**: in `CAPITAL_LOGIN` va l'email
   che trovi in *Impostazioni › Profilo* su Capital.com (con "Nascondi la mia
   email" di Apple è un indirizzo `…@privaterelay.appleid.com`). La password è
   sempre quella della chiave API.
+- **Il robot non apre niente**: nella scheda *Robot*, sotto *Cosa ha fatto*,
+  c'è il motivo. Se è vuoto, controlla che l'orologio (cron) sia acceso: senza,
+  il robot non gira mai.
+- **«Ordine rifiutato da Capital.com: …»** nel diario: Capital.com dice il perché
+  (fondi, taglia, distanza dello stop, mercato chiuso). Il robot passa al mercato
+  dopo e lo stesso errore lo scrive una volta ogni mezz'ora, non ogni minuto.
 - **«Il ponte non risponde»**: l'indirizzo deve essere quello del Worker
   (`https://…workers.dev`), senza niente dopo. Aprilo nel browser: deve dire
   *il ponte è acceso*.

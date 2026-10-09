@@ -308,7 +308,7 @@ var CHIAVI = { cfg: 'mirino_cfg_v1', mano: 'mirino_mano_v1', segui: 'mirino_segu
 var LISTA_BASE = ['US500', 'US100', 'DE40', 'IT40', 'NVDA', 'TSLA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL',
                   'AMD', 'AVGO', 'NFLX', 'PLTR', 'COIN', 'MSTR', 'UBER'];
 var CFG_BASE = { ponte: '', chiave: '', budget: null, profilo: 'aggressivo', stile: 'swing', lista: LISTA_BASE.slice(),
-                 riferimento: 'US500', esempio: true, avvisiIngresso: true };
+                 riferimento: 'US500', esempio: true, avvisiIngresso: true, robotPerdita: 50, robotPosti: 10 };
 
 var S = {
   tab: 'radar', cfg: null, modo: 'esempio',
@@ -318,7 +318,8 @@ var S = {
   analisi: {}, bt: {}, calib: null, deriveCal: null, colpiTutti: [], colpiPortafoglio: [], rifSer: null, rifVivo: null, dettagli: {},
   capPos: [], capPosCaricate: false, verdetti: {},
   scelto: null, foglio: null, avviso: null, scoperte: null, cerca: { testo: '', risultati: null, inCorso: false },
-  ultimoGiro: 0, ultimoCorto: 0, ultimoLungo: 0, ultimoBattito: 0, battendo: false, grafici: {}
+  ultimoGiro: 0, ultimoCorto: 0, ultimoLungo: 0, ultimoBattito: 0, battendo: false, grafici: {},
+  robot: null, robotQuando: 0, robotOccupato: false, robotStoria: null
 };
 
 /* ══════════════════════════════════════════════════════════════
@@ -334,7 +335,7 @@ function caricaCfg(){
   var c = leggi(CHIAVI.cfg, null) || {};
   var cfg = {};
   Object.keys(CFG_BASE).forEach(function(k){ cfg[k] = c[k] !== undefined ? c[k] : (Array.isArray(CFG_BASE[k]) ? CFG_BASE[k].slice() : CFG_BASE[k]); });
-  if(!M.PROFILI[cfg.profilo]) cfg.profilo = 'aggressivo';
+  if(!M.PROFILI[cfg.profilo] || M.PROFILI[cfg.profilo].robot) cfg.profilo = 'aggressivo';
   if(!M.STILI[cfg.stile]) cfg.stile = 'swing';
   S.cfg = cfg;
   /* ?esempio nell'indirizzo forza i dati finti, anche con il ponte collegato */
@@ -561,6 +562,7 @@ function carica(forza){
     if(!S.scelto || !S.analisi[S.scelto]) S.scelto = (classifica()[0] || {}).epic || S.cfg.lista[0];
     controllaConsigli(true);
     inviaImpostazioni();
+    if(S.modo === 'vero') caricaRobot();
     render();
     if(S.tab === 'radar') caricaScoperte();
   }).catch(function(e){
@@ -775,10 +777,15 @@ function assicuraRischio(pos){
 
 function posizioniTutte(){
   var segui = leggi(CHIAVI.segui, {});
+  var delRobot = idRobot();
   var cap = S.capPos.map(function(p){
     var imp = segui[p.id] || {};
     var x = Object.assign({}, p, imp);
     x.stop = p.stopBroker != null ? p.stopBroker : (imp.stopMentale != null ? imp.stopMentale : null);
+    /* le posizioni del robot: una sola per colpo, niente meta' e niente
+       rinforzo; il rischio iniziale e' quello con cui le ha aperte */
+    var rb = delRobot[p.id];
+    if(rb){ x.robot = true; x.parziale = true; x.rinforzata = true; x.R = rb.R; x.stopIniziale = rb.stopIniziale; }
     return x;
   });
   var mano = leggi(CHIAVI.mano, []).map(function(m){ return Object.assign({ manuale: true }, m); });
@@ -808,7 +815,8 @@ function controllaConsigli(silenzio){
     if(!c) return;
     var prima = S.verdetti[p.id];
     S.verdetti[p.id] = c.verdetto;
-    if(silenzio || !prima || prima === c.verdetto || !DA_AVVISARE[c.verdetto]) return;
+    /* le posizioni del robot le muove lui: niente avvisi da eseguire a mano */
+    if(p.robot || silenzio || !prima || prima === c.verdetto || !DA_AVVISARE[c.verdetto]) return;
     var nome = (S.mercati[p.epic] && S.mercati[p.epic].nome) || p.nome || p.epic;
     mostraAvviso(c.titolo + ' · ' + nome, c.frase);
     notifica(c.titolo + ' · ' + nome, c.frase);
@@ -817,7 +825,7 @@ function controllaConsigli(silenzio){
 
 function urgenti(){
   var n = 0;
-  posizioniTutte().forEach(function(p){ var v = S.verdetti[p.id]; if(v && v !== 'tieni' && v !== 'attento') n++; });
+  posizioniTutte().forEach(function(p){ var v = S.verdetti[p.id]; if(!p.robot && v && v !== 'tieni' && v !== 'attento') n++; });
   return n;
 }
 
@@ -857,6 +865,7 @@ function battito(){
   var corte = adesso - S.ultimoCorto > 120000, lunghe = adesso - S.ultimoLungo > 600000;
   if(corte){ S.ultimoCorto = adesso; dentro.forEach(function(e){ lavori.push(caricaCorte(e)); }); }
   if(lunghe){ S.ultimoLungo = adesso; dentro.forEach(function(e){ lavori.push(caricaCandele(e)); }); }
+  if(S.modo === 'vero' && (S.tab === 'robot' || (S.robot && S.robot.robot && S.robot.robot.acceso && adesso - S.robotQuando > 50000))) lavori.push(caricaRobot());
   Promise.all(lavori).then(function(){
     if(corte || lunghe) dentro.forEach(analizzaUno);
   }).catch(function(){}).then(function(){
@@ -1205,7 +1214,7 @@ function tabColpo(){
     '<span>' + valutaConto() + '</span></div>' +
     (S.conto && S.conto.disponibile != null ? '<p class="piccolo" style="margin:-6px 0 12px">Disponibili sul conto Capital.com: <b class="num">' + soldi(S.conto.disponibile) + '</b>. ' +
       'Il budget e\' la parte che decidi di rischiare con Mirino, non tutto il conto.</p>' : '') +
-    '<div class="seg" style="margin-bottom:8px">' + Object.keys(M.PROFILI).map(function(k){
+    '<div class="seg" style="margin-bottom:8px">' + Object.keys(M.PROFILI).filter(function(k){ return !M.PROFILI[k].robot; }).map(function(k){
       return '<button class="' + (S.cfg.profilo === k ? 'on' : '') + '" onclick="impostaProfilo(\'' + k + '\')">' + M.PROFILI[k].nome + '</button>';
     }).join('') + '</div><p class="piccolo" style="margin:0 0 12px">' + esc(prof.frase) + '</p>' +
     '<div class="seg">' + Object.keys(M.STILI).map(function(k){
@@ -1422,7 +1431,7 @@ function tabGioco(){
 function schedaPosizione(p, c){
   var mk = S.mercati[p.epic] || {}, h = '<div class="card">';
   h += '<div class="pos-testa">' + pillola(p.dir) + '<div class="nm"><b>' + esc(nomeDi(p.epic)) + '</b><div>' + fmt(p.dim, p.dim % 1 ? 2 : 0) + ' a ' + prezzo(p.entrata) +
-    ' · da ' + durata(Date.now() - p.aperta) + ' · ' + (p.capital ? 'Capital.com' : 'a mano') + '</div></div>' +
+    ' · da ' + durata(Date.now() - p.aperta) + ' · ' + (p.robot ? 'robot' : p.capital ? 'Capital.com' : 'a mano') + '</div></div>' +
     (c ? '<div class="num ' + (c.pnlConto >= 0 ? 'pos' : 'neg') + '" style="font-weight:700;font-size:16px">' + soldiS(c.pnlConto) + '</div>' : '') + '</div>';
   if(!c){ return h + '<p class="piccolo">Nessun prezzo per ' + esc(p.epic) + ' adesso.</p></div>'; }
   h += '<div class="verdetto ' + c.tono + '"><div class="t">' + esc(c.titolo) + '</div><div class="f">' + esc(c.frase) + '</div></div>';
@@ -1437,6 +1446,10 @@ function schedaPosizione(p, c){
   }
   var righe = c.motivi.slice(c.verdetto === 'attento' ? 1 : 0).concat(c.info);
   if(righe.length) h += '<ul class="elenco">' + righe.map(function(r){ return '<li>' + esc(r) + '</li>'; }).join('') + '</ul>';
+  if(p.robot){
+    return h + '<p class="piccolo" style="margin:10px 0 0"><b>La gestisce il robot</b>: stop e take profit sono su Capital.com, e al giro di ogni minuto ' +
+      'il robot sposta lo stop o la chiude da solo. Non serve fare niente.</p></div>';
+  }
   var az = [];
   if(!p.parziale && c.rMax >= M.REGOLE.tp1 * 0.9) az.push('<button class="btn picc ok" onclick="segna(\'' + esc(p.id) + '\',\'parziale\')">Ho preso meta\'</button>');
   if(c.verdetto === 'stop' || (p.manuale && c.faseStop !== 'iniziale')) az.push('<button class="btn picc" onclick="segna(\'' + esc(p.id) + '\',\'stop\')">Stop spostato a ' + prezzo(c.stopRegola) + '</button>');
@@ -1462,6 +1475,190 @@ function libroHTML(){
         '<td class="' + (x.pnl >= 0 ? 'pos' : 'neg') + '">' + (x.approssimato ? '≈' : '') + conSegno(x.pnl, 0) + '</td></tr>';
     }).join('') + '</table></div><p class="piccolo" style="margin:0 3px">≈ chiusa su Capital.com: l\'uscita e\' l\'ultimo prezzo visto, non quello esatto.</p>';
   return h;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   IL ROBOT
+
+   Vive nel ponte, non qui: il telefono lo accende, lo spegne e lo
+   guarda. Cosi' lavora anche con l'app chiusa, e se il telefono si
+   spegne non succede niente di strano. Le regole sono quelle del
+   motore, profilo Estremo, una posizione sola per colpo; il freno e' la
+   perdita massima dall'avvio.
+   ══════════════════════════════════════════════════════════════ */
+function idRobot(){
+  var m = {};
+  ((S.robot && S.robot.robot && S.robot.robot.aperte) || []).forEach(function(a){ m[a.id] = a; });
+  return m;
+}
+
+function caricaRobot(){
+  if(S.modo !== 'vero') return Promise.resolve();
+  return chiediPonte('/api/robot').then(function(d){
+    S.robot = d; S.robotQuando = Date.now();
+    if(S.tab === 'robot' && !S.foglio) render();
+  }, function(e){
+    /* un ponte vecchio non conosce /api/robot: va ricopiato */
+    S.robot = /niente qui/i.test(e.message) ? { vecchio: true } : { errore: e.message };
+    S.robotQuando = Date.now();
+    if(S.tab === 'robot' && !S.foglio) render();
+  });
+}
+
+/* Le regole del robot rigiocate sulla storia: una posizione sola, profilo
+   Estremo, al massimo N posizioni aperte insieme. */
+function storiaRobot(){
+  var st = M.STILI[S.cfg.stile], posti = Math.max(1, Math.min(10, S.cfg.robotPosti || 10));
+  var chiave = S.cfg.stile + '|' + posti + '|' + S.cfg.lista.join(',') + '|' + S.ultimoGiro;
+  if(S.robotStoria && S.robotStoria.chiave === chiave) return S.robotStoria;
+  var colpi = [];
+  S.cfg.lista.forEach(function(ep){
+    if(!S.cs[ep] || S.cs[ep].length < M.CALDO) return;
+    var mk = S.mercati[ep] || {};
+    var bt = M.backtest(S.cs[ep], { rif: ep === S.cfg.riferimento ? null : S.rifSer, soglia: M.sogliaProfilo('estremo'), stile: S.cfg.stile,
+                                    notte: mk.notte || undefined, unaSola: true });
+    bt.colpi.forEach(function(c){ c.epic = ep; colpi.push(c); });
+  });
+  var presi = M.portafoglio(colpi, posti);
+  S.robotStoria = { chiave: chiave, r: M.riassumi(presi), colpi: presi, unita: st.unita };
+  return S.robotStoria;
+}
+
+function robotRegoleHTML(){
+  var P = M.PROFILI.estremo, Rg = M.REGOLE;
+  return '<div class="h2">Come gioca</div><div class="card"><ul class="elenco" style="margin:0">' +
+    '<li>Guarda un mercato della lista al minuto, a rotazione. Entra quando il segnale e\' A, B o C <b>e</b> il momento e\' "entra ora": mai a prezzo scappato.</li>' +
+    '<li>Rischia ' + pc(P.rischio, 0) + ' del budget su un A, ' + pc(P.rischio * 0.75, 1) + ' su un B, ' + pc(P.rischio * 0.5, 0) + ' su un C. Usa la leva che hai su Capital.com.</li>' +
+    '<li>Ogni posizione nasce con <b>stop loss</b> (' + Rg.stopAtr + ' ATR) e <b>take profit</b> (' + Rg.tp2 + 'R) gia\' su Capital.com: se il ponte si ferma, restano.</li>' +
+    '<li>A +' + Rg.pareggioDa + 'R porta lo stop a pareggio; da +' + Rg.tp1 + 'R lo stop insegue il prezzo a ' + Rg.trailAtr + ' ATR. Niente meta\': lascia correre tutto.</li>' +
+    '<li>Esce se il segnale si gira, dopo il tempo massimo (' + M.STILI.swing.maxBarre + ' giorni in swing), o prima della chiusura in intraday.</li>' +
+    '<li>Non mette mai a rischio piu\' di quanto resta della <b>perdita massima</b>. Se la perdita dall\'avvio la raggiunge, si ferma da solo e chiude tutto.</li>' +
+    '<li>Non tocca le posizioni che apri tu.</li></ul></div>';
+}
+
+function robotStoriaHTML(){
+  var s = storiaRobot(), r = s.r;
+  if(!r.n) return '';
+  var rischioMedio = (S.cfg.budget || 0) * M.PROFILI.estremo.rischio * 0.75;
+  return '<div class="h2">Sulla storia<span class="r">' + r.n + ' colpi</span></div><div class="card">' +
+    '<p style="margin:0 0 10px;font-size:14px;line-height:1.5">Le stesse regole del robot rigiocate sulla storia dei mercati della lista, con al massimo ' +
+    (S.cfg.robotPosti || 10) + ' posizioni insieme: <b>' + fmt(r.pVince * 100, 0) + '%</b> in guadagno, <b>' + erre(r.rMedio) + '</b> a colpo, peggior serie <b>' +
+    fmt(-r.maxDD, 1) + 'R</b>' + (rischioMedio > 0 ? ' (circa ' + soldiS(-r.maxDD * rischioMedio) + ' col tuo budget)' : '') + '.</p>' +
+    graficoCurva('g-robot', s.colpi) +
+    (S.modo === 'esempio' ? '<div class="nota warn"><b>Dati inventati:</b> questi numeri non valgono niente.</div>'
+                          : '<p class="piccolo" style="margin:8px 0 0">Storia, non promessa. Spread, notti e slittamento degli stop sono compresi; le notizie e i buchi del lunedi\' no.</p>') + '</div>';
+}
+
+function tabRobot(){
+  var h = '';
+  if(S.modo !== 'vero'){
+    h += '<div class="card"><div class="vuoto"><b>Il robot lavora sul tuo conto</b>Apre e chiude da solo attraverso il ponte su Cloudflare, anche con l\'app chiusa. ' +
+      'Prima collega il ponte dalla scheda <b>Ponte</b>.</div></div>';
+    return h + robotRegoleHTML() + robotStoriaHTML();
+  }
+  var R = S.robot;
+  if(!R){ caricaRobot(); return h + '<div class="card"><div class="vuoto"><b>Chiedo al ponte…</b></div></div>'; }
+  if(R.vecchio){
+    return h + '<div class="nota warn"><b>Il ponte su Cloudflare e\' la versione vecchia</b> e non sa ancora fare il robot. Ricopialo: apri ' +
+      '<a href="https://github.com/w8997wnwy5-collab/capital_com/blob/claude/sleepy-ptolemy-xwmkf5/server/worker.js" target="_blank" rel="noopener">server/worker.js</a> › ' +
+      '<b>Copy raw file</b>; su Cloudflare, il tuo Worker › <b>Edit code</b> › cancella tutto, incolla › <b>Deploy</b>. Poi torna qui.</div>' + robotRegoleHTML();
+  }
+  if(R.errore) return h + '<div class="nota warn">' + esc(R.errore) + '</div><button class="btn" onclick="caricaRobot()">Riprova</button>';
+  if(!R.memoria) return h + '<div class="nota warn">Al Worker manca il deposito <b>MEMORIA</b> (KV): senza, il robot non puo\' ricordare cosa ha aperto. ' +
+    'Istruzioni nella guida del ponte.</div>';
+
+  var rb = R.robot || {}, acceso = !!rb.acceso, conto = R.conto || {}, val = conto.valuta || valutaConto();
+  var risultato = R.risultato, perdita = risultato != null ? Math.max(0, -risultato) : 0, tetto = rb.perditaMax || S.cfg.robotPerdita || 50;
+  var quota = Math.min(1, perdita / tetto);
+  h += '<div class="hero"><svg class="mirino" viewBox="0 0 100 100" aria-hidden="true">' + MIRINO_SVG + '</svg>' +
+    '<div class="l">' + (R.demo ? 'Conto demo' : 'Conto reale') + ' · profilo Estremo</div>' +
+    '<div class="v">' + (acceso ? 'Il robot e\' acceso' : 'Il robot e\' spento') + '</div>' +
+    '<div class="s">' + (acceso ? 'Da ' + durata(Date.now() - rb.avviato) + '. Lavora anche con l\'app chiusa.'
+       : rb.motivo === 'tetto' ? 'Si e\' fermato da solo: ha raggiunto la perdita massima.'
+       : rb.fermato ? 'Fermato ' + giornoOra(rb.fermato) + '.' : 'Non e\' mai stato acceso.') + '</div>' +
+    (rb.capitaleIniziale != null ? '<div class="riga"><div>Dall\'avvio<b class="' + (risultato >= 0 ? '' : '') + '">' + (risultato != null ? soldiS(risultato, 2) : '—') + '</b></div>' +
+      '<div>Tetto<b>' + fmt(tetto, 0) + ' ' + esc(val) + '</b></div><div>Posizioni<b>' + (rb.aperte || []).length + ' / ' + (rb.maxPosizioni || 10) + '</b></div></div>' : '') + '</div>';
+  if(rb.capitaleIniziale != null){
+    h += '<div class="card" style="padding:13px 15px"><div class="piccolo" style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Perdita dall\'avvio</span>' +
+      '<span class="num">' + fmt(perdita, 2) + ' / ' + fmt(tetto, 0) + ' ' + esc(val) + '</span></div>' +
+      '<div class="barra" style="min-width:0"><i class="c" style="right:auto;left:0;width:' + (quota * 100).toFixed(1) + '%;background:' + (quota > 0.7 ? 'var(--warn)' : 'var(--amber)') + '"></i></div></div>';
+  }
+
+  if(acceso){
+    h += '<div class="fila"><button class="btn" onclick="fermaRobot(false)"' + (S.robotOccupato ? ' disabled' : '') + '>Ferma</button>' +
+      '<button class="btn ko" onclick="fermaRobot(true)"' + (S.robotOccupato ? ' disabled' : '') + '>Ferma e chiudi tutto</button></div>' +
+      '<p class="piccolo" style="margin:8px 3px 14px"><b>Ferma</b>: non apre piu\' niente, le posizioni aperte le porta a fine con le loro regole. <b>Ferma e chiudi tutto</b>: chiude subito. ' +
+      'Da Telegram: /stop e /chiudi.</p>';
+  } else {
+    var budget = S.cfg.budget || 0;
+    h += '<div class="card"><div class="h2" style="margin:0 0 10px">Prima di accenderlo</div>' +
+      '<div class="fila"><div class="campo" style="flex:1"><label for="rb-perdita">Perdita massima (' + esc(val) + ')</label>' +
+      '<input id="rb-perdita" type="number" inputmode="decimal" min="1" step="5" value="' + (S.cfg.robotPerdita || 50) + '" oninput="campoRobot(\'robotPerdita\', this.value)"></div>' +
+      '<div class="campo" style="flex:1"><label for="rb-posti">Posizioni al massimo</label>' +
+      '<input id="rb-posti" type="number" inputmode="numeric" min="1" max="10" step="1" value="' + (S.cfg.robotPosti || 10) + '" oninput="campoRobot(\'robotPosti\', this.value)"></div></div>' +
+      '<p class="piccolo" style="margin:0 0 12px">Budget <b class="num">' + fmt(budget, 0) + ' ' + esc(val) + '</b> (dal Colpo) · stile <b>' + M.STILI[S.cfg.stile].nome + '</b> · ' +
+      S.cfg.lista.length + ' mercati · disponibili sul conto <b class="num">' + (conto.disponibile != null ? fmt(conto.disponibile, 2) : '—') + ' ' + esc(val) + '</b>. ' +
+      'Il tetto conta da quando premi Avvia.</p>' +
+      (budget > 0 ? '' : '<div class="nota warn">Metti un budget nella scheda Colpo.</div>') +
+      (R.telegram ? '' : '<div class="nota amb">Telegram non e\' collegato: il robot lavora lo stesso, ma non ti scrive cosa fa e non puoi fermarlo da li\'.</div>') +
+      '<button class="btn acc" onclick="avviaRobot()"' + (S.robotOccupato || !(budget > 0) ? ' disabled' : '') + '>Avvia il robot</button></div>';
+  }
+
+  var aperte = rb.aperte || [];
+  h += '<div class="h2">Le sue posizioni<span class="r">' + aperte.length + '</span></div>';
+  if(!aperte.length) h += '<div class="card"><div class="vuoto" style="padding:14px">' + (acceso ? 'Nessuna, per ora: aspetta un segnale buono.' : 'Nessuna.') + '</div></div>';
+  else h += '<div class="card" style="padding:6px 14px"><table class="tab-d"><tr><th>Mercato</th><th>Entrata</th><th>Stop</th><th>Ora</th></tr>' + aperte.map(function(a){
+    var r = a.prezzo != null && a.R > 0 ? (a.prezzo - a.entrata) * a.dir / a.R : null;
+    return '<tr><td class="t">' + freccia(a.dir) + ' ' + esc(a.nome || a.epic) + '<div class="piccolo">' + fmt(a.dim, a.dim % 1 ? 2 : 0) + ' · ' + giornoOra(a.aperta) + '</div></td>' +
+      '<td>' + prezzo(a.entrata) + '</td><td>' + prezzo(a.stop != null ? a.stop : a.stopIniziale) + '</td>' +
+      '<td class="' + (r == null ? '' : r >= 0 ? 'pos' : 'neg') + '">' + (r != null ? erre(r) : '—') + '</td></tr>';
+  }).join('') + '</table></div>';
+
+  var diario = rb.diario || [];
+  if(diario.length){
+    h += '<div class="h2">Cosa ha fatto</div><div class="card" style="padding:8px 14px">' + diario.slice(0, 15).map(function(d){
+      var tono = d.tipo === 'errore' || d.tipo === 'tetto' ? 'neg' : d.tipo === 'aperta' ? 'pos' : '';
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px;line-height:1.45"><span class="num muto" style="font-size:11px">' + giornoOra(d.quando) +
+        '</span><br><span class="' + tono + '">' + esc(d.testo) + '</span></div>';
+    }).join('') + '</div>';
+  }
+  h += robotRegoleHTML() + robotStoriaHTML();
+  h += '<p class="piccolo" style="margin:14px 3px 0">Il robot puo\' perdere tutta la perdita massima, e in fretta: con la leva un periodo storto arriva prima di quanto sembri. ' +
+    'Il tetto lo ferma li\'; i buchi di prezzo (notizie, aperture del lunedi\') possono superarlo di poco.</p>';
+  return h;
+}
+
+function campoRobot(k, v){
+  var x = parseFloat(String(v).replace(',', '.'));
+  if(k === 'robotPosti') x = Math.max(1, Math.min(10, Math.round(x) || 10));
+  if(x > 0){ S.cfg[k] = x; salvaCfg(); S.robotStoria = null; }
+}
+
+function avviaRobot(){
+  var R = S.robot || {}, val = (R.conto && R.conto.valuta) || valutaConto();
+  var perdita = S.cfg.robotPerdita || 50, posti = S.cfg.robotPosti || 10;
+  var conto = R.demo ? 'DEMO' : 'REALE';
+  if(!confirm('Il robot aprira\' e chiudera\' posizioni da solo sul conto ' + conto + ', profilo Estremo, fino a ' + posti + ' posizioni.\n\n' +
+              'Si ferma da solo e chiude tutto se perde ' + fmt(perdita, 0) + ' ' + val + ' da adesso.\n\nAvvio?')) return;
+  S.robotOccupato = true; render();
+  chiediPonte('/api/robot/avvia', { metodo: 'POST', corpo: { budget: S.cfg.budget, perditaMax: perdita, maxPosizioni: posti, stile: S.cfg.stile,
+                                                             lista: S.cfg.lista, riferimento: S.cfg.riferimento } })
+    .then(function(d){
+      mostraAvviso('Robot acceso', 'Tetto ' + fmt(perdita, 0) + ' ' + val + '. ' + (d.webhook ? 'Su Telegram: /stato /stop /chiudi.' : 'Fermalo da qui.'));
+    }, function(e){ mostraAvviso('Non si accende', e.message); })
+    .then(function(){ S.robotOccupato = false; return caricaRobot(); });
+}
+
+function fermaRobot(chiudi){
+  if(chiudi && !confirm('Fermo il robot e chiudo SUBITO tutte le sue posizioni a mercato?')) return;
+  S.robotOccupato = true; render();
+  chiediPonte('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: !!chiudi } })
+    .then(function(d){
+      var male = (d.esiti || []).filter(function(e){ return !e.ok; }).length;
+      mostraAvviso('Robot fermato', chiudi ? 'Chiuse ' + (d.esiti || []).filter(function(e){ return e.ok; }).length + ' posizioni' + (male ? ', ' + male + ' NON chiuse: controlla su Capital.com.' : '.')
+                                           : 'Non apre piu\' niente; le posizioni aperte le porta a fine.');
+    }, function(e){ mostraAvviso('Non si ferma', e.message + ' Usa /stop su Telegram o chiudi da Capital.com.'); })
+    .then(function(){ S.robotOccupato = false; return caricaRobot(); });
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1517,14 +1714,15 @@ function tabPrecisione(){
   h += '<div class="h2">Come e\' misurato</div><div class="card"><ul class="elenco" style="margin:0">' +
     '<li>Il segnale si legge sulla candela chiusa, si entra all\'apertura della successiva. Nessun indicatore guarda avanti: lo verifica un test.</li>' +
     '<li>Si paga lo spread vero di ogni candela di Capital.com: si compra all\'ask, si vende al bid.</li>' +
-    '<li>Se in una candela si toccano sia lo stop sia l\'obiettivo, si assume lo stop. Se il mercato apre oltre lo stop, si esce all\'apertura, non allo stop.</li>' +
+    '<li>Se in una candela si toccano sia lo stop sia l\'obiettivo, si assume lo stop. Se il mercato apre oltre lo stop, si esce all\'apertura, non allo stop. ' +
+      'E ogni stop preso dentro la candela esce un po\' peggio del livello (' + M.REGOLE.slittamentoAtr + ' ATR): uno stop e\' un ordine a mercato.</li>' +
     '<li>Le notti si pagano: ' + (S.cfg.stile === 'swing' ? 'il tasso di Capital.com, o una stima prudente se non lo manda.' : 'in intraday non ce ne sono, si chiude a fine giornata.') + '</li>' +
     '<li>I pesi del punteggio non sono stati ottimizzati su questi dati, apposta: un punteggio tarato sul passato vince sempre sul passato.</li>' +
     '<li>R e\' il rischio del colpo: +1R vuol dire aver guadagnato quanto si rischiava.</li></ul></div>';
   h += '<div class="h2">Cosa il motore non sa</div><div class="card"><ul class="elenco" style="margin:0">' +
     '<li><b>Le trimestrali.</b> Capital.com non le passa: un titolo puo\' aprire il giorno dopo i conti con un buco del 15%, ben oltre lo stop. Controllale prima di entrare.</li>' +
     '<li><b>Le notizie.</b> Il motore legge prezzi, non giornali.</li>' +
-    '<li><b>Lo slittamento.</b> Uno stop a mercato veloce esce peggio del livello scritto. Nel backtest c\'e\' solo per i buchi d\'apertura.</li>' +
+    '<li><b>Lo slittamento vero.</b> Nel backtest ogni stop paga 0.05 ATR; in un mercato che corre puo\' essere di piu\'.</li>' +
     '<li><b>La folla.</b> Il sentiment dei clienti entra nel punteggio di oggi, ma non nel backtest: la sua storia non esiste.</li>' +
     '<li><b>Il futuro.</b> Una regola che ha funzionato non e\' una regola che funzionera\'. Con la leva, un periodo storto costa il doppio.</li></ul></div>';
   return h;
@@ -1654,7 +1852,7 @@ function testoQuando(ms){
 /* ══════════════════════════════════════════════════════════════
    AZIONI
    ══════════════════════════════════════════════════════════════ */
-function vai(t){ S.tab = t; history.replaceState(null, '', '#' + t); render(); window.scrollTo(0, 0); if(t === 'radar') caricaScoperte(); }
+function vai(t){ S.tab = t; history.replaceState(null, '', '#' + t); render(); window.scrollTo(0, 0); if(t === 'radar') caricaScoperte(); if(t === 'robot') caricaRobot(); }
 function scegli(ep){ if(!ep) return; S.scelto = ep; vai('colpo'); }
 
 function impostaBudget(v){
@@ -1857,11 +2055,12 @@ var MIRINO_SVG = '<circle cx="50" cy="50" r="30" fill="none" stroke="currentColo
 var TABS = [
   { k: 'radar', n: 'Radar', p: 'M12 3a9 9 0 1 0 9 9M12 7a5 5 0 1 0 5 5M12 12l7-7' },
   { k: 'colpo', n: 'Colpo', p: 'M12 2v4M12 18v4M2 12h4M18 12h4M12 6a6 6 0 1 0 0 12a6 6 0 1 0 0-12M12 11v2' },
+  { k: 'robot', n: 'Robot', p: 'M13 2 4 14h7l-1 8 9-12h-7z' },
   { k: 'gioco', n: 'In gioco', p: 'M3 12h4l3-8 4 16 3-8h4' },
   { k: 'precisione', n: 'Precisione', p: 'M4 20V10M10 20V4M16 20v-7M22 20H2' },
   { k: 'ponte', n: 'Ponte', p: 'M2 17h20M5 17v-5a7 7 0 0 1 14 0v5M9 17v-4M15 17v-4' }
 ];
-var TITOLI = { radar: 'Dove giocare', colpo: 'Il colpo', gioco: 'In gioco', precisione: 'Precisione', ponte: 'Il ponte' };
+var TITOLI = { radar: 'Dove giocare', colpo: 'Il colpo', robot: 'Il robot', gioco: 'In gioco', precisione: 'Precisione', ponte: 'Il ponte' };
 
 function sottotitolo(){
   var st = M.STILI[S.cfg.stile].nome;
@@ -1919,7 +2118,7 @@ function disegna(app){
   if(S.stato === 'carico'){ app.innerHTML = schermataCarico(); return; }
   if(S.stato === 'errore'){ app.innerHTML = schermataErrore(); return; }
   if(!S.cfg.budget && S.tab !== 'ponte'){ app.innerHTML = schermataBenvenuto(); return; }
-  var corpo = S.tab === 'colpo' ? tabColpo() : S.tab === 'gioco' ? tabGioco() : S.tab === 'precisione' ? tabPrecisione() :
+  var corpo = S.tab === 'colpo' ? tabColpo() : S.tab === 'robot' ? tabRobot() : S.tab === 'gioco' ? tabGioco() : S.tab === 'precisione' ? tabPrecisione() :
               S.tab === 'ponte' ? tabPonte() : tabRadar();
   var modo = S.modo === 'vero' ? (S.ponte && S.ponte.demo ? '<span class="modo demo">demo</span>' : '<span class="modo vero">reale</span>') : '<span class="modo">esempio</span>';
   var h = '<div class="top"><div class="ttl"><h1>' + TITOLI[S.tab] + modo + '</h1><div class="sub">' + esc(sottotitolo()) + '</div></div>' +

@@ -45,12 +45,18 @@ function normale(rnd) {
    venti passi, e apertura, massimo, minimo e chiusura vengono da li'. La
    chiusura di una e' l'apertura della successiva: niente buchi, quindi niente
    regali e niente furti al momento dell'uscita. */
-function passeggiata(n, seme, vol, spreadRel) {
+/* I passi dentro la candela contano: con pochi passi il prezzo salta oltre lo
+   stop di un pezzo, e un backtest che esce sul livello esatto ci guadagna
+   sopra (succedeva: +0.04R a colpo su 9'000 colpi). Per il test dello zero
+   servono candele fatte di molti passi piccoli, quasi continue; il backtest
+   vero quello slittamento lo paga (REGOLE.slittamentoAtr). */
+function passeggiata(n, seme, vol, spreadRel, passi) {
+  passi = passi || 20;
   var rnd = generatore(seme), p = 100, out = [], i, j;
   for (i = 0; i < n; i++) {
     var o = p, h = p, l = p;
-    for (j = 0; j < 20; j++) {
-      p *= Math.exp(vol / Math.sqrt(20) * normale(rnd) - 0.5 * vol * vol / 20);
+    for (j = 0; j < passi; j++) {
+      p *= Math.exp(vol / Math.sqrt(passi) * normale(rnd) - 0.5 * vol * vol / passi);
       if (p > h) h = p; if (p < l) l = p;
     }
     out.push({ t: Date.UTC(2020, 0, 1) + i * 86400000, o: o, h: h, l: l, c: p, s: p * (spreadRel || 0), v: 1000 });
@@ -153,8 +159,8 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
 /* ── il backtest su una passeggiata a caso ──────────────────────────────── */
 (function () {
   var tutti = [], conCosti = [], fuori = 0, s;
-  for (s = 1; s <= 60; s++) {
-    var cs = passeggiata(900, 1000 + s, 0.02, 0);
+  for (s = 1; s <= 120; s++) {
+    var cs = passeggiata(900, 1000 + s, 0.02, 0, 400);
     var bt = M.backtest(cs, { soglia: 28, senzaCosti: true });
     bt.colpi.forEach(function (c) {
       tutti.push(c);
@@ -291,6 +297,65 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
   prova('notti: un tasso annuo si riporta a una notte', vicino(M.notteDa({ longRate: -6.4, shortRate: -1 }).lungo, 6.4 / 360 / 100));
   prova('pronto: un B si gioca da aggressivo, non da deciso', M.pronto({ ok: true, grado: 'B' }, 'aggressivo') && !M.pronto({ ok: true, grado: 'B' }, 'deciso'));
   prova('soglie dei profili', M.sogliaProfilo('deciso') === 55 && M.sogliaProfilo('aggressivo') === 40 && M.sogliaProfilo('spinto') === 28);
+})();
+
+/* ── il robot ───────────────────────────────────────────────────────────── */
+(function () {
+  var ora = Date.UTC(2026, 9, 7, 16, 0);
+  var an = { ok: true, dir: 1, grado: 'B', punti: 45 };
+  /* piano di base: R = 3 USD, cambio 0.8, leva 5, rischio previsto 7.5 CHF (B al 10% di 100) */
+  function piano(x) {
+    return Object.assign({ R: 3, entrata: 100, stop: 97, tp2: 110.5, tipo: 'mercato', dim: 3, passo: 0.1, dimMin: 0.1,
+                           cambio: 0.8, leva: 5, rischioSoldi: 7.5, motivoTempo: 'adesso' }, x || {});
+  }
+  var stato = { aperte: 2, maxPosizioni: 10, residuo: 50, rischioAperto: 10, disponibile: 59 };
+  function e(x) { return M.robotEntrata(Object.assign({ an: an, piano: piano(), stato: stato, ora: ora, stile: 'swing' }, x || {})); }
+
+  var ok = e();
+  prova('robot: segnale pronto, a mercato, spazio e margine: apre', ok.apri && ok.dim === 3 && ok.stop === 97 && ok.tp === 110.5, JSON.stringify(ok));
+  prova('robot: senza segnale non apre', !e({ an: { ok: true, dir: 1, grado: '', punti: 12 } }).apri);
+  prova('robot: prezzo scappato (limite) non apre: aspetta', !e({ piano: piano({ tipo: 'limite' }) }).apri);
+  prova('robot: gia\' dentro su quel mercato non apre', !e({ giaDentro: true }).apri);
+  prova('robot: posti pieni non apre', !e({ stato: Object.assign({}, stato, { aperte: 10 }) }).apri);
+  prova('robot: chiusa da poco nella stessa direzione non riapre', !e({ chiusaDiRecente: { dir: 1, quando: ora - 3600000 } }).apri &&
+        e({ chiusaDiRecente: { dir: -1, quando: ora - 3600000 } }).apri && e({ chiusaDiRecente: { dir: 1, quando: ora - 30 * 3600000 } }).apri);
+  var stretto = e({ stato: Object.assign({}, stato, { residuo: 12, rischioAperto: 10 }) });
+  prova('robot: il tetto di perdita taglia la taglia (restano 2 CHF: 0.8 azioni)', stretto.apri && stretto.dim === 0.8 && stretto.rischio <= 2 + 1e-9,
+        JSON.stringify(stretto));
+  prova('robot: tetto esaurito non apre', !e({ stato: Object.assign({}, stato, { residuo: 50, rischioAperto: 50 }) }).apri);
+  var poco = e({ stato: Object.assign({}, stato, { disponibile: 20 }) });
+  prova('robot: il margine disponibile taglia la taglia', poco.apri && poco.margine <= 20 * 0.9 + 1e-9 && poco.dim === 1.1, JSON.stringify(poco));
+  prova('robot: senza margine non apre', !e({ stato: Object.assign({}, stato, { disponibile: 1 }) }).apri);
+  var minimo = e({ piano: piano({ dim: 0, dimMin: 1, rischioSoldi: 1.5 }) });
+  prova('robot: taglia minima accettata se rischia al massimo il doppio', minimo.apri && minimo.dim === 1, JSON.stringify(minimo));
+  prova('robot: taglia minima rifiutata se rischia di piu\'', !e({ piano: piano({ dim: 0, dimMin: 1, rischioSoldi: 1 }) }).apri);
+  prova('robot: intraday, a 30 minuti dalla chiusura non apre', !e({ stile: 'intraday', orario: { aperto: true, chiude: ora + 30 * 60000 } }).apri &&
+        e({ stile: 'intraday', orario: { aperto: true, chiude: ora + 3 * 3600000 } }).apri);
+
+  var pos = { dir: 1, stop: 97 };
+  var c = function (x) { return Object.assign({ verdetto: 'tieni', frase: '', stopRegola: 97, faseStop: 'iniziale', R: 3, uscita: 101, barre: 2 }, x); };
+  prova('robot: consiglio esci = chiude', M.robotUscita(c({ verdetto: 'esci', frase: 'girato' }), pos, 'swing').azione === 'chiudi');
+  prova('robot: consiglio incassa = chiude', M.robotUscita(c({ verdetto: 'incassa' }), pos, 'swing').azione === 'chiudi');
+  prova('robot: oltre il tempo massimo chiude', M.robotUscita(c({ barre: 21 }), pos, 'swing').azione === 'chiudi');
+  var sp = M.robotUscita(c({ stopRegola: 100.15, faseStop: 'pareggio', uscita: 103.2 }), pos, 'swing');
+  prova('robot: a +1R sposta lo stop a pareggio su Capital.com', sp.azione === 'stop' && sp.livello === 100.15, JSON.stringify(sp));
+  prova('robot: uno spostamento piccolo non si fa (niente raffiche di modifiche)', M.robotUscita(c({ stopRegola: 97.3 }), pos, 'swing').azione === null);
+  prova('robot: non mette lo stop oltre il prezzo', M.robotUscita(c({ stopRegola: 101.5, uscita: 101 }), pos, 'swing').azione === null);
+  prova('robot: senza stop su Capital.com lo mette', M.robotUscita(c({ stopRegola: 97 }), { dir: 1, stop: null }, 'swing').azione === 'stop');
+
+  /* il backtest del robot: una posizione sola, la passeggiata a caso resta a zero */
+  var tutti = [];
+  for (var sd = 1; sd <= 120; sd++) tutti = tutti.concat(M.backtest(passeggiata(900, 3000 + sd, 0.02, 0, 400), { soglia: 28, senzaCosti: true, unaSola: true }).colpi);
+  var rr = M.riassumi(tutti);
+  prova('backtest del robot (senza meta\'): passeggiata a caso compatibile con zero', Math.abs(rr.tStat) < 2.6 && rr.n > 200,
+        'colpi ' + rr.n + ', R medio ' + rr.rMedio.toFixed(4) + ', t ' + rr.tStat.toFixed(2));
+  /* una posizione sola: il risultato in R e' tutto nell'unica uscita, quindi
+     (uscita - entrata) e R hanno lo stesso segno, colpo per colpo */
+  var coerenti = tutti.every(function (k) { var m = (k.uscita - k.entrata) * k.dir; return k.r === 0 || m === 0 || (m > 0) === (k.r > 0); });
+  prova('backtest del robot: ogni colpo ha un\'uscita sola', coerenti);
+  var conSlip = M.riassumi(M.backtest(passeggiata(900, 77, 0.02, 0.0005), { soglia: 28 }).colpi);
+  var senzaSlip = M.riassumi(M.backtest(passeggiata(900, 77, 0.02, 0.0005), { soglia: 28, senzaCosti: true }).colpi);
+  prova('lo slittamento sugli stop costa, non regala', conSlip.rMedio < senzaSlip.rMedio, conSlip.rMedio.toFixed(4) + ' < ' + senzaSlip.rMedio.toFixed(4));
 })();
 
 /* ── orari di mercato ───────────────────────────────────────────────────── */

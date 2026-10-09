@@ -15,6 +15,11 @@ sposta lo stop, prendi metà, rinforza, esci. Se l'app è chiusa, te lo scrive s
 Telegram — e ti scrive anche quando un mercato della lista è pronto per entrare,
 con l'ordine già calcolato.
 
+E se vuoi che faccia tutto da solo, c'è **il robot**: premi *Avvia* e apre e
+chiude posizioni sul tuo conto, con il profilo **Estremo**, finché non lo fermi
+tu o finché non arriva alla **perdita massima** che hai scelto. Lì si ferma e
+chiude tutto.
+
 Il profilo di partenza è **medio-alto**: il 4% del budget a colpo, segnali A e B,
 fino a tre colpi aperti. Non è prudente, e non vuole esserlo. Ma ogni colpo ha
 uno stop, e ogni numero che l'app mostra viene da quello che le stesse regole
@@ -48,6 +53,7 @@ tutti. I numeri d'esempio nell'app sono **inventati** e lo dicono.
 |---|---|
 | **Radar** | Il vento del mercato (S&P 500 sopra o sotto le medie) e tutti i mercati della lista in ordine: chi è pronto, chi quasi, chi è fermo. Per ognuno direzione, grado, punteggio, quando entrare (*Entra ora*, *Limite 182.40*, *Se rompe 190.10*), la folla di Capital.com e com'è andata la sua storia. Sotto, dove si muove Capital.com oggi. |
 | **Colpo** | Un solo campo — quanto vuoi mettere — e da lì tutto: il piano dei colpi di adesso con rischio e margine totali, e per ogni mercato l'ordine esatto da fare su Capital.com, stop, due obiettivi, rischio in franchi, margine con la tua leva, quante volte segnali così sono andati bene, dove può stare il prezzo fra una settimana, e perché. |
+| **Robot** | *Avvia* e *Ferma*. Apre e chiude da solo, anche con l'app chiusa: perdita dall'avvio contro il tetto, le sue posizioni, cosa ha fatto, le stesse regole rigiocate sulla storia. Da Telegram: `/stato`, `/stop`, `/chiudi`. |
 | **In gioco** | Le posizioni aperte: quelle su Capital.com le vede da solo, appena le apri. Per ognuna il consiglio di adesso, in grande, con il motivo. Sotto, il libro delle chiuse. |
 | **Precisione** | Le stesse regole rigiocate sugli ultimi quattro anni di ogni mercato: colpi, vinti, R medio, il periodo peggiore, la curva colpo dopo colpo. Detto in italiano prima che in numeri, compreso *potrebbe essere fortuna* quando lo è. |
 | **Ponte** | Il collegamento a Capital.com, la lista dei mercati (si cerca e si aggiunge qualunque cosa quoti Capital.com), gli avvisi. |
@@ -145,8 +151,10 @@ zero, il centro resta sul prezzo di oggi e l'app lo scrive.
 L'app è una pagina statica e pubblica: le chiavi di Capital.com lì dentro le
 leggerebbe chiunque. Il ponte è un Worker su Cloudflare (gratis) che tiene le
 chiavi come segreti, apre la sessione con Capital.com e passa all'app solo
-quello che serve, da una lista di percorsi scritta nel codice. **In sola lettura**:
-non sa aprire né chiudere posizioni.
+quello che serve, da una lista di percorsi scritta nel codice. Quello che arriva
+da fuori (l'app, il browser) può **solo leggere**. Le uniche scritture verso
+Capital.com le fa il robot, quando lo accendi tu: aprire, spostare lo stop,
+chiudere. Non c'è un indirizzo del ponte che inoltri un ordine scelto da fuori.
 
 Ogni minuto guarda le posizioni aperte e, se il consiglio cambia, ti scrive su
 **Telegram**. Nello stesso giro guarda un mercato della lista, a rotazione, e se
@@ -156,11 +164,31 @@ candele dell'app: telefono e ponte non possono dare consigli diversi.
 
 Istruzioni passo per passo: [`server/COME-SI-ACCENDE.md`](server/COME-SI-ACCENDE.md).
 
+## Il robot
+
+Vive nel ponte, non nel telefono: gira nel cron di ogni minuto, anche con l'app
+chiusa. Il telefono lo accende, lo spegne e lo guarda.
+
+| Cosa | Come |
+|---|---|
+| Profilo | **Estremo**: segnali A, B e C, 10% del budget a colpo su un A (7.5% B, 5% C), fino a 10 posizioni |
+| Quando entra | un mercato della lista al minuto, a rotazione; solo se il segnale è pronto **e** il momento è "entra ora" (mai a prezzo scappato) |
+| Protezione | ogni posizione nasce con **stop loss** (1.5 ATR) e **take profit** (3.5R) già su Capital.com: se il ponte si ferma, restano |
+| Gestione | a +1R stop a pareggio, da +1.5R lo stop insegue a 2.5 ATR; esce se il segnale si gira, dopo il tempo massimo, prima della chiusura in intraday. Una posizione sola per colpo: niente metà |
+| Tetto | non mette mai a rischio più di quanto resta della **perdita massima**; se la perdita dall'avvio la raggiunge, si ferma e chiude tutto. Il tetto conta da quando premi *Avvia* e guarda tutto il conto |
+| Ferma | *Ferma*: non apre più niente, le posizioni aperte le porta a fine. *Ferma e chiudi tutto*: chiude subito. Da Telegram `/stop` e `/chiudi` |
+| Le tue posizioni | non le tocca |
+
+Con un conto piccolo le taglie minime e il margine decidono quante posizioni apre
+davvero: una taglia minima si accetta solo se rischia al massimo il doppio del
+previsto. Il tetto ferma le perdite normali; un buco di prezzo (una notizia,
+l'apertura del lunedì) può superarlo di quel tanto che nessuno stop può fermare.
+
 ## Come è verificato
 
 ```bash
-node tools/test_motore.js      # 61 controlli sul motore
-node tools/test_ponte.mjs      # 41 controlli sul ponte, con un Capital.com finto
+node tools/test_motore.js      # 84 controlli sul motore
+node tools/test_ponte.mjs      # 70 controlli sul ponte, con un Capital.com finto che accetta ordini
 node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 ```
 
@@ -168,29 +196,37 @@ node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 |---|---|
 | EMA, RSI, ATR contro un'implementazione scritta a parte | scarto 0 |
 | Il punteggio alla candela t, tagliando la storia a t (anche l'indice) | identico: nessuno sguardo nel futuro |
-| Passeggiata a caso senza costi, 3'500 colpi | R medio +0.02, t = 1.2: compatibile con zero, come deve |
-| Ogni prezzo d'entrata e d'uscita del backtest dentro la sua candela | 0 fuori su 7'000 |
+| Passeggiata a caso senza costi, 6'500 colpi (anche con le regole del robot) | R medio −0.01 e −0.02, t = −0.7 e −1.2: compatibile con zero, come deve |
+| Ogni prezzo d'entrata e d'uscita del backtest dentro la sua candela | 0 fuori su 13'000 |
 | Aggiungere lo spread | il risultato peggiora, mai migliora |
 | Il ponte: percorsi non in lista, scritture verso Capital.com, altri siti, codici sbagliati | tutti respinti |
 | Il ponte: stesso consiglio due minuti di fila | nessun secondo messaggio, nessuna scrittura |
 | Il ponte: avvisi d'ingresso su un giro della lista | esattamente i mercati che l'app chiama pronti, con la stessa taglia e lo stesso stop |
+| Il robot: ogni ordine | nasce con stop loss e take profit dalla parte giusta del prezzo |
+| Il robot: rischio e margine | rischio di tutte le posizioni sotto il tetto, margine sotto il disponibile |
+| Il robot: doppioni, stop, chiusure di Capital.com | nessun doppione; stop a pareggio una volta sola; si accorge delle chiusure |
+| Il robot: tetto di perdita | si ferma, chiude tutto e non apre più niente |
+| Il robot: comandi Telegram | solo dalla tua chat, con percorso e intestazione segreti |
 
 Il test sulla passeggiata a caso è quello decisivo: su un mercato senza memoria
 nessuna regola può guadagnare. Se il backtest dicesse il contrario, starebbe barando.
+E una volta barava: faceva uscire gli stop esattamente sul livello, e su campioni
+grandi questo inventava +0.03/+0.06R a colpo. Adesso ogni stop preso dentro la
+candela paga 0.05 ATR di slittamento, e il test usa candele quasi continue.
 
 Il backtest considera spread vero di ogni candela, buchi d'apertura (si esce
-all'apertura, non allo stop), lo stop prima dell'obiettivo quando nella stessa
-candela ci sono tutti e due, e le notti. Non considera le trimestrali, le notizie
-e lo slittamento sugli stop a mercato veloce: l'app lo dice nella scheda Precisione.
+all'apertura, non allo stop), slittamento sugli stop, lo stop prima
+dell'obiettivo quando nella stessa candela ci sono tutti e due, e le notti. Non
+considera le trimestrali e le notizie: l'app lo dice nella scheda Precisione.
 
 ## Come è fatta
 
 ```
-index.html              l'app: radar, colpo, in gioco, precisione, ponte
+index.html              l'app: radar, colpo, robot, in gioco, precisione, ponte
 motore.js               il motore: indicatori, punteggio, piano, consiglio, backtest. Niente DOM
 esempio.js              un Capital.com finto per provare senza chiavi, stesse risposte di quello vero
 sw.js, manifest.webmanifest, icon.svg     l'app sul telefono
-server/ponte.js         il Worker: sessione Capital.com, percorsi ammessi, avvisi Telegram
+server/ponte.js         il Worker: sessione Capital.com, percorsi ammessi, avvisi Telegram, il robot
 server/worker.js        ponte.js con il motore cucito sopra: e' il file da incollare su Cloudflare
 server/wrangler.toml    per chi pubblica il Worker dal terminale
 server/COME-SI-ACCENDE.md
@@ -206,7 +242,8 @@ clienti (`/clientsentiment`), posizioni aperte (`/positions`), conto e leve
 
 - Nel repository non c'è nessun segreto. Le chiavi di Capital.com e di Telegram stanno solo nei segreti del Worker.
 - Il ponte risponde solo con il codice d'accesso, solo all'indirizzo dell'app, e dopo dodici codici sbagliati blocca quell'indirizzo per un'ora.
-- Il ponte non può fare ordini. Se qualcuno rubasse il codice d'accesso potrebbe guardare, non toccare.
+- Dal ponte non passa nessun ordine scelto da fuori: le scritture verso Capital.com sono solo quelle del robot (aprire, spostare lo stop, chiudere). Chi rubasse il codice d'accesso potrebbe accendere o spegnere il robot, non fare un ordine suo.
+- I comandi del robot su Telegram funzionano solo dalla tua chat, su un percorso segreto e con un'intestazione segreta derivati dalla `CHIAVE`.
 - Budget, lista, posizioni segnate a mano e libro stanno solo nel browser del telefono.
 
 ## Se qualcosa non va
@@ -216,10 +253,14 @@ clienti (`/clientsentiment`), posizioni aperte (`/positions`), conto e leve
 - **Nessuna posizione in *In gioco*, ma su Capital.com ce l'hai**: controlla che il ponte sia sul conto giusto (`CAPITAL_DEMO`: `1` demo, `0` reale).
 - **Il consiglio sul telefono e quello su Telegram non coincidono**: lo stile (Swing o Intraday) si cambia dall'app, che lo passa al ponte per le posizioni aperte. Le posizioni aperte *prima* di collegare la memoria il ponte le legge con lo stile predefinito, Swing.
 - **Gli avvisi arrivano solo con l'app aperta**: quelli del telefono sì, è il telefono che addormenta le app. Quelli sicuri sono su Telegram.
+- **La scheda Robot dice "ponte vecchio"**: ricopia `server/worker.js` su Cloudflare (Edit code › incolla › Deploy).
+- **Il robot è acceso ma non apre niente**: nel diario c'è il motivo dell'ultimo mercato guardato. Di solito: nessun segnale pronto, prezzo scappato, mercato chiuso, taglia minima troppo grossa per il budget, margine finito.
 - Tutto il resto del ponte: [`server/COME-SI-ACCENDE.md`](server/COME-SI-ACCENDE.md#se-qualcosa-non-va).
 
 ## Avvertenza
 
 Il trading di CFD a leva comporta un rischio alto di perdere denaro in fretta.
-Questo software è fornito senza garanzie e non è una consulenza finanziaria.
-Usa solo capitale che puoi permetterti di perdere integralmente.
+Un robot che apre e chiude da solo lo fa senza chiederti niente. Questo software
+è fornito senza garanzie e non è una consulenza finanziaria. Usa solo capitale che
+puoi permetterti di perdere integralmente, e scegli una perdita massima che sei
+disposto a perdere tutta.
