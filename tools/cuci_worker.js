@@ -22,7 +22,10 @@ function cuci() {
          '   Si cambiano motore.js e server/ponte.js, poi:  node tools/cuci_worker.js\n' +
          '   E\' il file da incollare nel pannello di Cloudflare (vedi COME-SI-ACCENDE.md).\n' +
          '   ========================================================================== */\n\n' +
-         motore.trim() + '\n\nconst Motore = globalThis.Motore;\n\n' + ponte.trim() + '\n';
+         motore.trim() + '\n\nconst Motore = globalThis.Motore;\n\n' + ponte.trim() + '\n\n' +
+         '/* ===== FINE DI worker.js =====\n' +
+         '   Se in cima al pannello di Cloudflare c\'e\' "NON MODIFICARE QUESTO FILE" e in\n' +
+         '   fondo questa riga, hai incollato tutto. */\n';
 }
 module.exports = cuci;
 

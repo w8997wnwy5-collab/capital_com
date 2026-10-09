@@ -2712,3 +2712,7 @@ export default {
     ctx.waitUntil(sorveglia(env, evento && evento.scheduledTime).catch(e => console.log('sorveglianza:', e.message)));
   },
 };
+
+/* ===== FINE DI worker.js =====
+   Se in cima al pannello di Cloudflare c'e' "NON MODIFICARE QUESTO FILE" e in
+   fondo questa riga, hai incollato tutto. */
