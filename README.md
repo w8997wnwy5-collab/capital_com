@@ -198,7 +198,7 @@ l'apertura del lunedì) può superarlo di quel tanto che nessuno stop può ferma
 
 ```bash
 node tools/test_motore.js      # 91 controlli sul motore
-node tools/test_ponte.mjs      # 93 controlli sul ponte, con un Capital.com finto che accetta ordini
+node tools/test_ponte.mjs      # 97 controlli sul ponte, con un Capital.com finto che accetta ordini
 node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 ```
 

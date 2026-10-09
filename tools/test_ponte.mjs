@@ -109,6 +109,7 @@ async function brokerFinto(percorso, metodo, init) {
   const mc = /^confirms\/(.+)$/.exec(percorso);
   if (mc && broker.confermeRotte) return rispondi({ errorCode: 'error.service.unavailable' }, 500);
   if (mc) { const c = broker.conferme[decodeURIComponent(mc[1])]; return c ? rispondi(c) : rispondi({ errorCode: 'error.not-found.dealReference' }, 404); }
+  if (percorso === 'positions' && metodo === 'GET' && broker.posizioniRotte) return rispondi({ errorCode: 'error.service.unavailable' }, 503);
   if (percorso === 'positions' && metodo === 'GET') {
     const base = E.risposta('positions', {}, ORA_DATI);
     base.positions = base.positions.concat(broker.pos.map(x => ({ position: x.position, market: mercatoFinto(x.epic) })));
@@ -563,6 +564,25 @@ await tg(percorsoTg, '/chiudi');
 prova('Telegram: /chiudi chiude subito tutto', broker.pos.length === 0 && telegrammi.some(t => /POSIZIONI CHIUSE/.test(t.text || '')));
 await giroRobot(alle(15, 14, 31), 1);
 prova('e il giro dopo trova tutto chiuso', robotKV().aperte.length === 0 && !robotKV().chiudiTutto);
+
+/* Capital.com non risponde durante il giro: il Ferma vale lo stesso, e
+   l'errore arriva nell'app e su Telegram invece di un silenzio */
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: AZ } });
+await giroRobot(alle(16, 14), 1);
+await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: false } });
+broker.posizioniRotte = true;
+telegrammi.length = 0;
+await giroRobot(alle(16, 14, 1), 1);
+broker.posizioniRotte = false;
+st = robotKV();
+prova('Capital.com giu\' durante il giro: il Ferma si applica lo stesso', st.acceso === false && !comandoKV() || (st.acceso === false && st.comandoVisto === comandoKV().id),
+      JSON.stringify({ acceso: st.acceso }));
+prova('e l\'errore si vede: nello stato (per l\'app) e su Telegram', st.battito && /503/.test(st.battito.errore || '') && telegrammi.some(t => /il giro non parte/.test(t.text || '')),
+      JSON.stringify(st.battito));
+r = await chiedi('/api/sorveglia', { metodo: 'POST' });
+prova('il giro a mano dall\'app risponde e dice com\'e\' andato', r.stato === 200 && r.d && (r.d.robot || r.d.saltato || r.d.posizioni != null), JSON.stringify(r.d).slice(0, 120));
+r = await chiedi('/api/robot', {});
+prova('passato l\'errore, il giro dopo lo toglie dal battito', r.d.robot.battito && !r.d.robot.battito.errore, JSON.stringify(r.d.robot.battito));
 
 /* niente ordini scelti da fuori */
 r = await chiedi('/api/cap/positions', { metodo: 'POST', corpo: { epic: 'TSLA', direction: 'BUY', size: 100 } });

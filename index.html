@@ -1605,16 +1605,20 @@ function tabRobot(){
   var quota = Math.min(1, perdita / tetto);
 
   /* il cron gira? lo si capisce dal comando che resta in attesa o dal battito vecchio */
-  var cron = '<b>Settings › Triggers › Cron Triggers › Add</b>, scrivi <b>* * * * *</b>';
-  if(cmd && adesso - cmd.quando > 150000){
+  var cron = '<b>Settings › Triggers</b> (o <b>Trigger events</b>) › <b>Cron Triggers › Add</b>, scrivi <b>* * * * *</b> e salva';
+  var provaGiro = '<button class="btn picc" style="margin-top:10px" onclick="giroAdesso()"' + (S.robotOccupato ? ' disabled' : '') + '>Fai un giro adesso</button>';
+  var erroreGiro = rb.battito && rb.battito.errore ? rb.battito.errore : '';
+  if(erroreGiro && battito != null && battito < 15 * 60000){
+    h += '<div class="nota warn"><b>Il robot gira, ma l\'ultimo giro (' + durata(battito) + ' fa) si e\' fermato su un errore:</b> ' + esc(erroreGiro) + provaGiro + '</div>';
+  } else if(cmd && adesso - cmd.quando > 150000){
     h += '<div class="nota warn"><b>Il robot non gira.</b> Hai premuto ' + (cmd.azione === 'avvia' ? 'Avvia' : 'Ferma') + ' ' + durata(adesso - cmd.quando) +
-      ' fa e il ponte non l\'ha ancora fatto: su Cloudflare manca l\'orologio. Nel tuo Worker: ' + cron + '. ' +
-      'Se c\'e\' gia\', apri <b>Logs</b>: se i giri finiscono in errore (per esempio <i>Exceeded CPU</i>), aggiungi la variabile <b>ROBOT_CALCOLI</b> = <b>2</b>.</div>';
+      ' fa e il ponte non l\'ha ancora fatto. Quasi sempre manca l\'orologio di Cloudflare. Nel tuo Worker: ' + cron + '. ' +
+      'Prova anche il tasto qui sotto: fa un giro a mano e ti dice se il ponte e Capital.com rispondono, o su quale errore si ferma.' + provaGiro + '</div>';
   } else if(cmd){
     h += '<div class="nota acc">' + (cmd.azione === 'avvia' ? '<b>Si accende al prossimo giro</b>, entro un minuto o due. Su Telegram arriva <b>ROBOT ACCESO</b>: e\' la prova che l\'orologio di Cloudflare gira.'
                                                          : '<b>Si ferma al prossimo giro</b>, entro un minuto o due.' + (cmd.chiudi ? ' Le posizioni che conosceva le ha gia\' chiuse.' : '')) + '</div>';
   } else if(rb.acceso && (battito == null || battito > 15 * 60000)){
-    h += '<div class="nota warn"><b>Il robot non sta girando</b>' + (battito != null ? ': l\'ultimo giro e\' di ' + durata(battito) + ' fa' : '') + '. Nel tuo Worker su Cloudflare controlla l\'orologio (' + cron + ') e i <b>Logs</b>.</div>';
+    h += '<div class="nota warn"><b>Il robot non sta girando</b>' + (battito != null ? ': l\'ultimo giro e\' di ' + durata(battito) + ' fa' : '') + '. Nel tuo Worker su Cloudflare controlla l\'orologio (' + cron + ') e i <b>Logs</b>.' + provaGiro + '</div>';
   }
 
   var titolo = cmd ? (cmd.azione === 'avvia' ? 'Si sta accendendo' : 'Si sta fermando') : (acceso ? 'Il robot e\' acceso' : 'Il robot e\' spento');
@@ -1682,6 +1686,21 @@ function tabRobot(){
   h += '<p class="piccolo" style="margin:14px 3px 0">Il robot puo\' perdere tutta la perdita massima, e in fretta: con la leva un periodo storto arriva prima di quanto sembri. ' +
     'Il tetto lo ferma li\'; i buchi di prezzo (notizie, aperture del lunedi\') possono superarlo di poco.</p>';
   return h;
+}
+
+/* Un giro fatto a mano dall'app: serve a capire se il problema e' l'orologio
+   di Cloudflare (il giro a mano funziona) o il ponte e Capital.com (si ferma
+   su un errore, e qui si legge quale). */
+function giroAdesso(){
+  S.robotOccupato = true; render();
+  chiediPonte('/api/sorveglia', { metodo: 'POST' }).then(function(d){
+    var r = (d && d.robot) || {};
+    if(d && d.saltato) mostraAvviso('Giro saltato', d.saltato + '. Riprova fra un minuto.');
+    else if(r.errore) mostraAvviso('Il giro si ferma su un errore', r.errore);
+    else mostraAvviso('Il giro a mano funziona', 'Il ponte e Capital.com rispondono, e il comando e\' stato applicato. Quindi manca solo l\'orologio: nel tuo Worker su Cloudflare, ' +
+      'Settings › Triggers (o Trigger events) › Cron Triggers › Add › * * * * * › salva. Finche\' non c\'e\', il robot non gira da solo.');
+  }, function(e){ mostraAvviso('Il giro si ferma su un errore', e.message); })
+  .then(function(){ S.robotOccupato = false; return caricaRobot(); });
 }
 
 function campoRobot(k, v){

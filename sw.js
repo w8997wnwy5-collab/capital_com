@@ -5,7 +5,7 @@
 
    Le domande al ponte non passano di qui: sono di un altro dominio, e un
    prezzo di dieci minuti fa in cache sarebbe peggio di nessun prezzo. */
-var CACHE = 'mirino-v3';
+var CACHE = 'mirino-v4';
 var ASSETS = ['./', './index.html', './motore.js', './esempio.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', function(e){

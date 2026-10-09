@@ -1319,6 +1319,10 @@ const APP_PREDEFINITA = 'https://w8997wnwy5-collab.github.io/capital_com/';
 /* Capital.com chiude la sessione dopo dieci minuti senza richieste. Si
    rinnova a otto, prima che lo faccia lei. */
 const SESSIONE_MS = 8 * 60000;
+/* Quanto si aspetta una risposta prima di lasciar perdere. Senza, una
+   richiesta che non torna terrebbe il giro appeso fino a quando Cloudflare
+   lo chiude, e con lui il blocco "un giro alla volta". */
+const ATTESA_MS = 20000;
 
 /* I percorsi ammessi, con quanto si possono tenere in memoria (secondi).
    Le posizioni e il conto mai: sono la cosa che deve essere vera adesso. */
@@ -1410,6 +1414,7 @@ async function apriSessione(env) {
     method: 'POST',
     headers: { 'X-CAP-API-KEY': env.CAPITAL_API_KEY, 'content-type': 'application/json' },
     body: JSON.stringify({ identifier: env.CAPITAL_LOGIN, password: env.CAPITAL_PASSWORD, encryptedPassword: false }),
+    signal: AbortSignal.timeout(ATTESA_MS),
   });
   let r = await prova();
   /* Capital.com accetta un'apertura al secondo: se due copie del Worker ci
@@ -1460,6 +1465,7 @@ async function chiediCapital(env, percorso, query, tentativo = 0) {
   const qs = query && [...query.keys()].length ? '?' + query.toString() : '';
   const r = await fetch(server(env) + '/api/v1/' + percorso + qs, {
     headers: { 'X-SECURITY-TOKEN': s.token, 'CST': s.cst },
+    signal: AbortSignal.timeout(ATTESA_MS),
   });
   if (r.status === 401 && tentativo === 0) { sessione = null; return chiediCapital(env, percorso, query, 1); }
   if (r.status === 429 && tentativo === 0) {
@@ -1529,6 +1535,7 @@ async function scriviCapital(env, metodo, percorso, corpo, tentativo = 0) {
     method: metodo,
     headers: { 'X-SECURITY-TOKEN': s.token, 'CST': s.cst, 'content-type': 'application/json' },
     body: corpo ? JSON.stringify(corpo) : undefined,
+    signal: AbortSignal.timeout(ATTESA_MS),
   });
   /* 401 e 429 vogliono dire che Capital.com NON ha eseguito: si puo' riprovare
      una volta senza rischiare un ordine doppio */
@@ -1598,7 +1605,8 @@ async function telegram(env, testo) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT, text: testo, parse_mode: 'HTML', disable_web_page_preview: true }),
-  });
+    signal: AbortSignal.timeout(10000),
+  }).catch(e => new Response(JSON.stringify({ ok: false, description: 'Telegram non risponde (' + e.message + ')' }), { status: 599 }));
   let d = {};
   try { d = await r.json(); } catch (e) { /* niente */ }
   return { ok: r.ok && d.ok !== false, motivo: d.description || (r.ok ? '' : 'Telegram ha risposto ' + r.status) };
@@ -2432,10 +2440,15 @@ function unisciVisti(a, b) {
   for (const [k, v] of Object.entries(b || {})) if (!out[k] || (v && v.quando > out[k].quando)) out[k] = v;
   return out;
 }
+let giroDa = 0;
 async function sorveglia(env, ora) {
-  if (giroInCorso) return { saltato: 'il giro di prima non e\' ancora finito' };
-  giroInCorso = sorvegliaUnGiro(env, ora);
-  try { return await giroInCorso; } finally { giroInCorso = null; }
+  /* un giro rimasto appeso (una risposta mai arrivata, un'esecuzione chiusa
+     da Cloudflare a meta') non deve bloccare per sempre questa copia: dopo
+     tre minuti il blocco non vale piu' */
+  if (giroInCorso && Date.now() - giroDa < 3 * 60000) return { saltato: 'il giro di prima non e\' ancora finito' };
+  const mio = sorvegliaUnGiro(env, ora);
+  giroInCorso = mio; giroDa = Date.now();
+  try { return await mio; } finally { if (giroInCorso === mio) giroInCorso = null; }
 }
 
 async function sorvegliaUnGiro(env, ora) {
@@ -2444,12 +2457,32 @@ async function sorvegliaUnGiro(env, ora) {
   const letto = await leggiKV(env, 'robot');
   const comando = await leggiKV(env, 'robot:comando');
   const pendente = comandoPendente(letto, comando);
-  const robotVivo = !!(pendente || (letto && (letto.acceso || (letto.aperte || []).length || (letto.inAttesa || []).length || letto.chiudiTutto)));
+  const robotVivo = !!(pendente || (letto && (letto.acceso || (letto.aperte || []).length || (letto.inAttesa || []).length || letto.chiudiTutto ||
+                                              (letto.battito && letto.battito.errore))));
   const avvisi = !!(env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT);
   if (!avvisi && !robotVivo) return { saltato: 'avvisi spenti' };
   const imp = (await leggiKV(env, 'impostazioni')) || {};
   const ctx = { rif: {}, folle: {}, freddi: 0 };
-  const lista = await posizioniAperte(env);
+  let lista;
+  try { lista = await posizioniAperte(env); }
+  catch (e) {
+    /* Capital.com non risponde o rifiuta: il giro non si puo' fare. Un Ferma
+       pero' si applica lo stesso (per fermarsi non serve Capital.com), e
+       l'errore va nello stato: l'app lo mostra, invece di "non gira". */
+    if (robotVivo) {
+      const robot = { ...robotBase(), ...(letto || {}) };
+      const prima = sostanza(robot);
+      if (pendente && pendente.azione === 'ferma') applicaComando(robot, pendente, ora, (tipo, testo) => annota(robot, ora, tipo, testo));
+      robot.battito = { quando: ora, errore: e.message };
+      if (!robot.errori[e.message] || ora - robot.errori[e.message] > 30 * 60000) {
+        robot.errori[e.message] = ora;
+        annota(robot, ora, 'errore', 'Giro saltato: ' + e.message);
+        await telegram(env, '<b>ROBOT · il giro non parte</b>\nCapital.com: ' + html(e.message) + (pendente && pendente.azione === 'ferma' ? '\nIl Ferma l\'ho applicato lo stesso.' : ''));
+      }
+      if (sostanza(robot) !== prima || ora - (robot.scritto || 0) >= BATTITO_MS) { robot.scritto = ora; await scriviKV(env, 'robot', robot); }
+    }
+    throw e;
+  }
   let esitoRobot = null, robot = letto;
   if (robotVivo) {
     robot = { ...robotBase(), ...(letto || {}) };
@@ -2473,14 +2506,19 @@ async function sorvegliaUnGiro(env, ora) {
     try { esitoRobot = await giroRobot(env, ctx, robot, lista, rifEpic, ora, { comando, salva }); }
     catch (e) {
       esitoRobot = { errore: e.message };
+      robot.battito = { ...(robot.battito || { quando: ora }), errore: e.message };
       robot.errori = robot.errori || {};
       if (!robot.errori[e.message] || ora - robot.errori[e.message] > 30 * 60000) {
         robot.errori[e.message] = ora;
         annota(robot, ora, 'errore', e.message);
+        await telegram(env, '<b>ROBOT · il giro si ferma</b>\n' + html(e.message));
       }
     }
     vistiInMemoria = { ...robot.visti };
-    if (sostanza(robot) !== prima || ora - (robot.scritto || 0) >= BATTITO_MS) await salva();
+    /* un errore nel battito si toglie subito appena un giro va bene: l'app
+       non deve continuare a mostrarlo per cinque minuti */
+    const errorePassato = !!(letto && letto.battito && letto.battito.errore) && !(robot.battito && robot.battito.errore);
+    if (sostanza(robot) !== prima || errorePassato || ora - (robot.scritto || 0) >= BATTITO_MS) await salva();
   }
   const rifEpic = (robot && robot.acceso && robot.riferimento) || imp.riferimento || env.RIFERIMENTO || 'US500';
   /* le posizioni del robot le gestisce lui: gli avvisi sono per le altre */
