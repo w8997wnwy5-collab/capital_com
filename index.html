@@ -308,7 +308,7 @@ var CHIAVI = { cfg: 'mirino_cfg_v1', mano: 'mirino_mano_v1', segui: 'mirino_segu
 var LISTA_BASE = ['US500', 'US100', 'DE40', 'IT40', 'NVDA', 'TSLA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL',
                   'AMD', 'AVGO', 'NFLX', 'PLTR', 'COIN', 'MSTR', 'UBER'];
 var CFG_BASE = { ponte: '', chiave: '', budget: null, profilo: 'aggressivo', stile: 'swing', lista: LISTA_BASE.slice(),
-                 riferimento: 'US500', esempio: true, avvisiIngresso: true, robotPerdita: 50, robotPosti: 10 };
+                 riferimento: 'US500', esempio: true, avvisiIngresso: true, robotPerdita: 50, robotPosti: 10, robotLeva: true };
 
 var S = {
   tab: 'radar', cfg: null, modo: 'esempio',
@@ -1535,8 +1535,9 @@ function robotRegoleHTML(stile){
   var tempo = stile === 'swing' ? St.maxBarre + ' giorni' : stile === 'rapido' ? (St.maxBarre / 4) + ' ore' : St.maxBarre + ' ore';
   return '<div class="h2">Come gioca<span class="r">' + St.nome + '</span></div><div class="card"><ul class="elenco" style="margin:0">' +
     '<li>Guarda ' + (quanti === 1 ? 'un mercato' : quanti + ' mercati') + ' della lista al minuto, a rotazione. Entra quando il segnale e\' A, B o C <b>e</b> il momento e\' "entra ora": mai a prezzo scappato.</li>' +
-    '<li>La taglia si ragiona sulla <b>perdita massima</b>: con ' + fmt(tetto, 0) + ' ' + esc(v) + ' rischia ' + fmt(M.rischioRobot(tetto, 'A'), 2) + ' su un A, ' +
-      fmt(M.rischioRobot(tetto, 'B'), 2) + ' su un B, ' + fmt(M.rischioRobot(tetto, 'C'), 2) + ' su un C. Se la taglia minima di Capital.com rischia di piu\', va bene fino a meta\' del tetto.</li>' +
+    '<li>Gioca per il massimo. La taglia si ragiona sulla <b>perdita massima</b>: con ' + fmt(tetto, 0) + ' ' + esc(v) + ' rischia ' + fmt(M.rischioRobot(tetto, 'A'), 2) + ' su un A, ' +
+      fmt(M.rischioRobot(tetto, 'B'), 2) + ' su un B, ' + fmt(M.rischioRobot(tetto, 'C'), 2) + ' su un C. Con un conto piccolo il limite vero e\' il margine: ne usa fino al ' +
+      Math.round(M.ROBOT.margineUsabile * 100) + '%, con la leva al massimo se l\'hai scelta.</li>' +
     '<li>Ogni posizione nasce con <b>stop loss</b> (' + Rg.stopAtr + ' ATR) e <b>take profit</b> (+' + Rg.tp2 + 'R) gia\' su Capital.com: se il ponte si ferma, restano.</li>' +
     '<li>A +' + Rg.pareggioDa + 'R porta lo stop a pareggio; da +' + Rg.tp1 + 'R lo stop insegue il prezzo a ' + Rg.trailAtr + ' ATR. Niente meta\': o tutto al take profit, o lo stop.</li>' +
     '<li>Esce se il segnale si gira, dopo ' + tempo + (St.chiudiASera ? ', o prima della chiusura' : '') + '.' +
@@ -1655,6 +1656,7 @@ function tabRobot(){
       '<input id="rb-perdita" type="number" inputmode="decimal" min="1" step="5" value="' + t + '" oninput="campoRobot(\'robotPerdita\', this.value)"></div>' +
       '<div class="campo" style="flex:1"><label for="rb-posti">Posizioni al massimo</label>' +
       '<input id="rb-posti" type="number" inputmode="numeric" min="1" max="10" step="1" value="' + (S.cfg.robotPosti || 10) + '" oninput="campoRobot(\'robotPosti\', this.value)"></div></div>' +
+      levaHTML(conto) +
       '<p class="piccolo" style="margin:0 0 12px">Rischio a colpo <b class="num">' + fmt(M.rischioRobot(t, 'A'), 2) + '</b> su un A, <b class="num">' + fmt(M.rischioRobot(t, 'C'), 2) + '</b> su un C · ' +
       S.cfg.lista.length + ' mercati · disponibili sul conto <b class="num">' + (conto.disponibile != null ? fmt(conto.disponibile, 2) : '—') + ' ' + esc(val) + '</b>. ' +
       'Il tetto conta da quando premi Avvia. Le posizioni al massimo contano anche le tue.</p>' +
@@ -1703,6 +1705,25 @@ function giroAdesso(){
   .then(function(){ S.robotOccupato = false; return caricaRobot(); });
 }
 
+/* La leva: con un conto piccolo e' lei, con il margine, a decidere quanto
+   e' grande una posizione. Qui si vede quanto si muove adesso e quanto con
+   la leva al massimo, e si sceglie se il robot la deve alzare. */
+function levaHTML(conto){
+  var leve = S.leve || {}, righe = [], dispo = conto && conto.disponibile > 0 ? conto.disponibile * M.ROBOT.margineUsabile : 0;
+  ['INDICES', 'SHARES', 'COMMODITIES', 'CRYPTOCURRENCIES', 'CURRENCIES'].forEach(function(tipo){
+    var v = leve[tipo];
+    if(!v || !v.available || !v.available.length) return;
+    var max = Math.max.apply(null, v.available), nome = { INDICES: 'indici', SHARES: 'azioni', COMMODITIES: 'materie prime', CRYPTOCURRENCIES: 'cripto', CURRENCIES: 'valute' }[tipo];
+    righe.push(nome + ' <b class="num">' + v.current + ':1</b>' + (max > v.current ? ' → <b class="num">' + max + ':1</b>' : ' (massimo)') +
+      (dispo ? ' · posizioni fino a ' + fmt(dispo * (S.cfg.robotLeva ? max : v.current), 0) + ' ' + esc(valutaConto()) : ''));
+  });
+  return '<label class="piccolo" style="display:flex;gap:10px;align-items:flex-start;margin:0 0 8px;cursor:pointer">' +
+    '<input type="checkbox" style="margin-top:3px"' + (S.cfg.robotLeva ? ' checked' : '') + ' onchange="S.cfg.robotLeva = this.checked; salvaCfg(); render()">' +
+    '<span><b>Leva al massimo su Capital.com.</b> All\'avvio il robot alza la leva al massimo che il tuo conto concede: con lo stesso margine apre posizioni piu\' grandi, ' +
+    'e guadagni e perdite corrono piu\' veloci. Il tetto di perdita resta quello.</span></label>' +
+    (righe.length ? '<p class="piccolo" style="margin:0 0 12px">' + righe.join('<br>') + '</p>' : '');
+}
+
 function campoRobot(k, v){
   var x = parseFloat(String(v).replace(',', '.'));
   if(k === 'robotPosti') x = Math.max(1, Math.min(10, Math.round(x) || 10));
@@ -1714,10 +1735,11 @@ function avviaRobot(){
   var perdita = S.cfg.robotPerdita || 50, posti = S.cfg.robotPosti || 10, st = M.STILI[S.cfg.stile];
   var conto = R.demo ? 'DEMO' : 'REALE';
   if(!confirm('Il robot aprira\' e chiudera\' posizioni da solo sul conto ' + conto + ', profilo Estremo, stile ' + st.nome + ', fino a ' + posti + ' posizioni.\n\n' +
-              'Rischia fino a ' + fmt(M.rischioRobot(perdita, 'A'), 2) + ' ' + val + ' a colpo. Si ferma da solo e chiude tutto se perde ' + fmt(perdita, 0) + ' ' + val + ' da adesso.\n\nAvvio?')) return;
+              'Rischia fino a ' + fmt(M.rischioRobot(perdita, 'A'), 2) + ' ' + val + ' a colpo' + (S.cfg.robotLeva ? ' e alza la leva al massimo su Capital.com' : '') +
+              '. Si ferma da solo e chiude tutto se perde ' + fmt(perdita, 0) + ' ' + val + ' da adesso.\n\nAvvio?')) return;
   S.robotOccupato = true; render();
   chiediPonte('/api/robot/avvia', { metodo: 'POST', corpo: { perditaMax: perdita, maxPosizioni: posti, stile: S.cfg.stile,
-                                                             lista: S.cfg.lista, riferimento: S.cfg.riferimento } })
+                                                             lista: S.cfg.lista, riferimento: S.cfg.riferimento, levaMassima: !!S.cfg.robotLeva } })
     .then(function(d){
       mostraAvviso('Robot in partenza', 'Si accende al prossimo giro, entro un minuto o due. ' + (d.webhook ? 'Su Telegram arriva ROBOT ACCESO; da li\': /stato /stop /chiudi.' : 'Fermalo da qui.') +
         ' Se fra due minuti qui c\'e\' ancora "Si sta accendendo", su Cloudflare manca l\'orologio (Cron Trigger).');

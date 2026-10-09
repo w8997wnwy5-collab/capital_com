@@ -9,8 +9,9 @@ browser, la **B** è per chi ha già un terminale aperto.
 
 > **Chi può scrivere sul conto.** Quello che arriva da fuori (l'app, il
 > browser) può solo leggere: prezzi, mercati, posizioni, conto. Le uniche
-> scritture verso Capital.com — aprire, spostare lo stop, chiudere — le fa il
-> **robot**, e solo quando lo accendi tu dalla scheda *Robot* dell'app. Non c'è
+> scritture verso Capital.com — aprire, spostare lo stop, chiudere e, se lo
+> chiedi all'avvio, alzare la leva al massimo — le fa il **robot**, e solo
+> quando lo accendi tu dalla scheda *Robot* dell'app. Non c'è
 > un indirizzo del ponte che inoltri un ordine scelto da fuori.
 
 ---

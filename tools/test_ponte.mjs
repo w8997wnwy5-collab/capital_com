@@ -63,7 +63,7 @@ const telegrammi = [];
    (riferimento subito, esito su /confirms), e li mette nelle posizioni. Il
    conto scende col margine usato; il risultato aperto si comanda da qui. */
 const ORA_DATI = Date.UTC(2026, 9, 7, 16, 0);
-const broker = { pos: [], conferme: {}, n: 0, prezzi: {}, ordini: [], modifiche: [], chiusure: [], rifiutati: [], ora: ORA_DATI };
+const broker = { pos: [], conferme: {}, n: 0, prezzi: {}, ordini: [], modifiche: [], chiusure: [], rifiutati: [], leveCambi: [], ora: ORA_DATI };
 const contoFinto = { pnl: 0, disponibile: 59 };
 const rispondi = (dati, stato = 200) => new Response(JSON.stringify(dati), { status: stato });
 function mercatoFinto(epic) {
@@ -109,6 +109,16 @@ async function brokerFinto(percorso, metodo, init) {
   const mc = /^confirms\/(.+)$/.exec(percorso);
   if (mc && broker.confermeRotte) return rispondi({ errorCode: 'error.service.unavailable' }, 500);
   if (mc) { const c = broker.conferme[decodeURIComponent(mc[1])]; return c ? rispondi(c) : rispondi({ errorCode: 'error.not-found.dealReference' }, 404); }
+  if (percorso === 'accounts/preferences') {
+    if (!broker.leve) broker.leve = E.risposta('accounts/preferences', {}, ORA_DATI);
+    if (metodo === 'PUT') {
+      const b = JSON.parse(init.body);
+      for (const [t, v] of Object.entries(b.leverages || {})) broker.leve.leverages[t].current = v;
+      broker.leveCambi.push(b);
+      return rispondi({ status: 'SUCCESS' });
+    }
+    return rispondi(broker.leve);
+  }
   if (percorso === 'positions' && metodo === 'GET' && broker.posizioniRotte) return rispondi({ errorCode: 'error.service.unavailable' }, 503);
   if (percorso === 'positions' && metodo === 'GET') {
     const base = E.risposta('positions', {}, ORA_DATI);
@@ -584,12 +594,35 @@ prova('il giro a mano dall\'app risponde e dice com\'e\' andato', r.stato === 20
 r = await chiedi('/api/robot', {});
 prova('passato l\'errore, il giro dopo lo toglie dal battito', r.d.robot.battito && !r.d.robot.battito.errore, JSON.stringify(r.d.robot.battito));
 
+/* la leva al massimo: la chiedi all'avvio, il robot la mette una volta */
+await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
+await giroRobot(alle(16, 15), 1);
+broker.leve.leverages.SHARES.current = 2;
+broker.leve.leverages.INDICES.current = 5;
+telegrammi.length = 0;
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: AZ, levaMassima: true } });
+await giroRobot(alle(16, 15, 1), 2);
+const cambio = broker.leveCambi[broker.leveCambi.length - 1];
+prova('leva massima: il robot la mette su Capital.com, una volta sola', broker.leveCambi.length === 1 && cambio.leverages.SHARES === 5 && cambio.leverages.INDICES === 20 &&
+      broker.leve.leverages.SHARES.current === 5, JSON.stringify(broker.leveCambi));
+prova('e lo dice nel diario e su Telegram', robotKV().diario.some(d => /Leva al massimo: .*SHARES 2:1 → 5:1/.test(d.testo)) && telegrammi.some(t => /LEVA AL MASSIMO/.test(t.text || '')));
+await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
+await giroRobot(alle(16, 16), 1);
+broker.leve.leverages.SHARES.current = 2;
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: AZ, levaMassima: false } });
+await giroRobot(alle(16, 16, 1), 1);
+prova('senza la richiesta, la leva non si tocca', broker.leveCambi.length === 1 && broker.leve.leverages.SHARES.current === 2);
+broker.leve.leverages.SHARES.current = 5;
+await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
+await giroRobot(alle(16, 17), 1);
+
 /* niente ordini scelti da fuori */
 r = await chiedi('/api/cap/positions', { metodo: 'POST', corpo: { epic: 'TSLA', direction: 'BUY', size: 100 } });
 prova('dall\'app non passa nessun ordine scelto da fuori', r.stato === 404 && !broker.ordini.some(o => o.size === 100));
 const scritture = chiamate.filter(c => c.url.startsWith(DEMO) && c.metodo !== 'GET');
-prova('le uniche scritture verso Capital.com: sessione, apri, sposta stop, chiudi', scritture.every(c =>
-  (c.metodo === 'POST' && /\/session$|\/positions$/.test(c.url)) || ((c.metodo === 'PUT' || c.metodo === 'DELETE') && /\/positions\/[^/]+$/.test(c.url))),
+prova('le uniche scritture verso Capital.com: sessione, apri, sposta stop, chiudi, leva', scritture.every(c =>
+  (c.metodo === 'POST' && /\/session$|\/positions$/.test(c.url)) || ((c.metodo === 'PUT' || c.metodo === 'DELETE') && /\/positions\/[^/]+$/.test(c.url)) ||
+  (c.metodo === 'PUT' && /\/accounts\/preferences$/.test(c.url))),
   [...new Set(scritture.map(c => c.metodo + ' ' + c.url.replace(DEMO, '').replace(/robot-\d+/, ':id')))].join(', '));
 
 /* ── il freno sui codici ── */

@@ -304,19 +304,21 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
   var ora = Date.UTC(2026, 9, 7, 16, 0);
   var an = { ok: true, dir: 1, grado: 'B', punti: 45 };
   /* piano di base: R = 3 USD, cambio 0.8 (2.40 CHF per unita'), leva 5. Il
-     tetto e' 50: un B rischia 50 x 0.2 x 0.75 = 7.50 CHF, cioe' 3.1 unita'. */
+     tetto e' 40: un B rischia 40 / 3 x 0.75 = 10 CHF, cioe' 4.1 unita'
+     (margine 65.60: il conto ne ha 80 disponibili). */
   function piano(x) {
     return Object.assign({ R: 3, entrata: 100, stop: 97, tp2: 110.5, tipo: 'mercato', dim: 3, passo: 0.1, dimMin: 0.1,
                            cambio: 0.8, leva: 5, rischioSoldi: 7.5, motivoTempo: 'adesso' }, x || {});
   }
-  var stato = { aperte: 2, maxPosizioni: 10, tetto: 50, residuo: 50, rischioAperto: 10, disponibile: 59 };
+  var stato = { aperte: 2, maxPosizioni: 10, tetto: 40, residuo: 40, rischioAperto: 10, disponibile: 80 };
   function e(x) { return M.robotEntrata(Object.assign({ an: an, piano: piano(), stato: stato, ora: ora, stile: 'swing' }, x || {})); }
 
-  prova('robot: il rischio a colpo si ragiona sul tetto (A 20%, B 15%, C 10%)',
-        M.rischioRobot(50, 'A') === 10 && M.rischioRobot(50, 'B') === 7.5 && M.rischioRobot(50, 'C') === 5);
+  var vicino6 = function (a, b) { return Math.abs(a - b) < 1e-9; };
+  prova('robot: il rischio a colpo si ragiona sul tetto (A un terzo, B un quarto, C un sesto)',
+        vicino6(M.rischioRobot(60, 'A'), 20) && vicino6(M.rischioRobot(60, 'B'), 15) && vicino6(M.rischioRobot(60, 'C'), 10));
   var ok = e();
-  prova('robot: segnale pronto, a mercato, spazio e margine: apre', ok.apri && ok.dim === 3.1 && ok.stop === 97 && ok.tp === 110.5 && ok.rischio <= 7.5 + 1e-9, JSON.stringify(ok));
-  prova('robot: il budget del Colpo non conta (la taglia viene dal tetto)', e({ piano: piano({ dim: 0.2, rischioSoldi: 0.5 }) }).dim === 3.1);
+  prova('robot: segnale pronto, a mercato, spazio e margine: apre', ok.apri && ok.dim === 4.1 && ok.stop === 97 && ok.tp === 110.5 && ok.rischio <= 10 + 1e-9, JSON.stringify(ok));
+  prova('robot: il budget del Colpo non conta (la taglia viene dal tetto)', e({ piano: piano({ dim: 0.2, rischioSoldi: 0.5 }) }).dim === 4.1);
   prova('robot: senza segnale non apre', !e({ an: { ok: true, dir: 1, grado: '', punti: 12 } }).apri);
   prova('robot: prezzo scappato (limite) non apre: aspetta', !e({ piano: piano({ tipo: 'limite' }) }).apri);
   prova('robot: gia\' dentro su quel mercato non apre', !e({ giaDentro: true }).apri);
@@ -332,10 +334,10 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
         JSON.stringify(stretto));
   prova('robot: tetto esaurito non apre', !e({ stato: Object.assign({}, stato, { residuo: 50, rischioAperto: 50 }) }).apri);
   var poco = e({ stato: Object.assign({}, stato, { disponibile: 20 }) });
-  prova('robot: il margine disponibile taglia la taglia', poco.apri && poco.margine <= 20 * 0.9 + 1e-9 && poco.dim === 1.1, JSON.stringify(poco));
+  prova('robot: il margine disponibile taglia la taglia (ne usa fino al 95%)', poco.apri && poco.margine <= 20 * 0.95 + 1e-9 && poco.dim === 1.1, JSON.stringify(poco));
   prova('robot: senza margine non apre, e dice quanto serve', !e({ stato: Object.assign({}, stato, { disponibile: 1 }) }).apri &&
         /servono/.test(e({ stato: Object.assign({}, stato, { disponibile: 1 }) }).motivo));
-  var piccolo = { aperte: 0, maxPosizioni: 10, tetto: 10, residuo: 10, rischioAperto: 0, disponibile: 59 };
+  var piccolo = { aperte: 0, maxPosizioni: 10, tetto: 6, residuo: 6, rischioAperto: 0, disponibile: 59 };
   var minimo = e({ piano: piano({ dimMin: 1, passo: 1 }), stato: piccolo });
   prova('robot: taglia minima accettata se rischia fino a meta\' del tetto', minimo.apri && minimo.dim === 1 && Math.abs(minimo.rischio - 2.4) < 1e-9, JSON.stringify(minimo));
   var troppo = e({ piano: piano({ dimMin: 1, passo: 1 }), stato: Object.assign({}, piccolo, { tetto: 4, residuo: 4 }) });

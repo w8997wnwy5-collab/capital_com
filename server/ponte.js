@@ -10,8 +10,8 @@
      SOLA LETTURA, TRANNE IL ROBOT. Tutto quello che arriva da fuori (l'app,
      il browser) puo' solo leggere: prezzi, mercati, posizioni, conto. Le
      uniche scritture verso Capital.com — aprire, spostare lo stop, chiudere
-     — le fa il robot, da solo, con le regole del motore, e solo quando lo
-     accendi tu. Non esiste un indirizzo del ponte che inoltri un ordine
+     e, se lo chiedi all'avvio, alzare la leva al massimo — le fa il robot,
+     da solo, con le regole del motore, e solo quando lo accendi tu. Non esiste un indirizzo del ponte che inoltri un ordine
      scelto da fuori: chi rubasse il codice d'accesso potrebbe accendere o
      spegnere il robot, non fare un ordine suo. Il robot ha un tetto di
      perdita: arrivato li' si ferma da solo e chiude tutto.
@@ -261,6 +261,7 @@ const SCRITTURE = [
   { metodo: 'POST',   re: /^positions$/ },                       /* apri */
   { metodo: 'PUT',    re: /^positions\/[A-Za-z0-9._-]{1,80}$/ },  /* sposta lo stop */
   { metodo: 'DELETE', re: /^positions\/[A-Za-z0-9._-]{1,80}$/ },  /* chiudi */
+  { metodo: 'PUT',    re: /^accounts\/preferences$/ },           /* la leva al massimo, se l'hai chiesto all'avvio */
 ];
 
 async function scriviCapital(env, metodo, percorso, corpo, tentativo = 0) {
@@ -775,6 +776,26 @@ async function chiudiTutto(env, robot, lista, ora, motivo) {
   return esiti;
 }
 
+/* La leva al massimo che Capital.com ti concede, per ogni tipo di strumento
+   (indici, azioni, ...): la chiedi tu all'avvio. Con un conto piccolo e' il
+   margine a decidere quanto e' grande una posizione, e la leva lo
+   moltiplica. Si fa una volta per avvio; se Capital.com dice di no, il robot
+   lo scrive e gioca con la leva che c'e'. */
+async function mettiLevaMassima(env, robot, nota) {
+  for (const k of [...memoria.keys()]) if (k.startsWith('accounts/preferences')) memoria.delete(k);
+  const pref = await leggi(env, 'accounts/preferences', new URLSearchParams());
+  const leve = pref.leverages || {}, nuove = {}, righe = [];
+  for (const [tipo, v] of Object.entries(leve)) {
+    const max = Math.max(...((v && v.available) || []).filter(x => x > 0));
+    if (Number.isFinite(max) && max > (v.current || 0)) { nuove[tipo] = max; righe.push(tipo + ' ' + (v.current || '?') + ':1 → ' + max + ':1'); }
+  }
+  if (!righe.length) { nota('leva', 'Leva gia\' al massimo che Capital.com ti concede.'); return { cambiata: false }; }
+  await scriviCapital(env, 'PUT', 'accounts/preferences', { leverages: nuove });
+  for (const k of [...memoria.keys()]) if (k.startsWith('accounts/preferences')) memoria.delete(k);
+  nota('leva', 'Leva al massimo: ' + righe.join(', ') + '.');
+  return { cambiata: true, righe };
+}
+
 /* il comando dall'app o da Telegram, una volta sola */
 function applicaComando(robot, comando, ora, nota) {
   if (!comando || comando.id === robot.comandoVisto) return null;
@@ -787,7 +808,7 @@ function applicaComando(robot, comando, ora, nota) {
       acceso: true, avviato: comando.quando, fermato: null, motivo: '', errori: {}, colpi: { n: 0, vinti: 0 },
       capitaleIniziale: comando.capitaleIniziale, valuta: comando.valuta,
       perditaMax: imp.perditaMax, maxPosizioni: imp.maxPosizioni, stile: imp.stile, lista: imp.lista, riferimento: imp.riferimento,
-      visti: {},
+      levaMassima: imp.levaMassima !== false, levaFatta: false, visti: {},
     });
     nota('acceso', 'Acceso. Tetto di perdita ' + M.fmtNum(robot.perditaMax, 2) + ' ' + (robot.valuta || '') + ', fino a ' + robot.maxPosizioni +
       ' posizioni, ' + robot.lista.length + ' mercati, ' + M.STILI[stileDi(robot)].nome + '.');
@@ -857,6 +878,13 @@ async function giroRobot(env, ctx, robot, lista, rifEpic, ora, opz) {
       S.nome + '. Rischio a colpo: ' + M.fmtNum(M.rischioRobot(robot.perditaMax, 'A'), 2) + ' su un A, ' + M.fmtNum(M.rischioRobot(robot.perditaMax, 'C'), 2) + ' su un C.\n' +
       'Guardo ' + robot.lista.length + ' mercati, ' + quanti + ' al minuto: il giro completo dura ' + Math.ceil(robot.lista.length / quanti) + ' minuti.\n' +
       'Comandi: /stato · /stop (non apro piu\' niente) · /chiudi (fermo e chiudo tutto)');
+  }
+  if (robot.acceso && robot.levaMassima && !robot.levaFatta) {
+    robot.levaFatta = true;
+    try {
+      const r = await mettiLevaMassima(env, robot, nota);
+      if (r.cambiata) await telegram(env, '<b>LEVA AL MASSIMO</b>\n' + html(r.righe.join('\n')) + '\nPosizioni piu\' grandi con lo stesso margine: guadagni e perdite piu\' veloci. Il tetto resta quello.');
+    } catch (e) { nota('errore', 'Non riesco a mettere la leva al massimo (' + e.message + '): gioco con quella che c\'e\'. Puoi alzarla tu su Capital.com, Impostazioni › Leva.'); }
   }
   let tettoAdesso = false;
   if (robot.acceso && perdita >= robot.perditaMax) {
@@ -1056,6 +1084,7 @@ async function avviaRobot(env, ora, b, origine) {
       perditaMax, maxPosizioni: Math.max(1, Math.min(10, Math.round(+b.maxPosizioni) || 10)),
       stile: M.STILI[b.stile] ? b.stile : 'swing', lista,
       riferimento: /^[A-Za-z0-9._-]{1,40}$/.test(String(b.riferimento || '')) ? String(b.riferimento) : 'US500',
+      levaMassima: b.levaMassima !== false,
     },
   };
   await scriviKV(env, 'robot:comando', comando);

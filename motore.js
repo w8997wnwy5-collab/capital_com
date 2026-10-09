@@ -934,18 +934,20 @@ function rischioIniziale(cs, ser, aperta, stile) {
    ponte, con le stesse regole del consiglio e del backtest (unaSola).
 
    La taglia si ragiona sul TETTO, la perdita massima che scegli tu, non sul
-   budget del Colpo: e' quella la cifra che hai deciso di poter perdere. Un
-   A rischia un quinto del tetto, un B 15%, un C un decimo. La taglia minima
-   di Capital.com si accetta anche se rischia di piu', fino a meta' del
-   tetto. E il robot non mette mai a rischio piu' di quanto resta del tetto:
+   budget del Colpo: e' quella la cifra che hai deciso di poter perdere, e
+   il robot gioca per il massimo. Un A rischia un terzo del tetto, un B un
+   quarto, un C un sesto: tre stop di fila e si ferma. La taglia minima di
+   Capital.com si accetta anche se rischia di piu', fino a meta' del tetto.
+   Con un conto piccolo pero' il freno vero e' il margine: il robot ne usa
+   fino al 95%, con la leva piu' alta che Capital.com ti concede. E il robot non mette mai a rischio piu' di quanto resta del tetto:
    se scattassero tutti gli stop insieme arriveresti li', non oltre — salvo
    i buchi di prezzo, che nessuno stop puo' fermare. */
 
 var ROBOT = {
   profilo: 'estremo',
-  quotaColpo: 0.2,                /* il rischio di un A, in quota del tetto (B 3/4, C 1/2) */
+  quotaColpo: 1 / 3,              /* il rischio di un A, in quota del tetto (B 3/4, C 1/2) */
   colpoMax: 0.5,                  /* con la taglia minima un colpo puo' rischiare fino a meta' del tetto */
-  margineUsabile: 0.9,            /* del margine disponibile sul conto: il resto e' cuscinetto */
+  margineUsabile: 0.95,           /* del margine disponibile sul conto: il resto e' cuscinetto */
   minutiPrimaChiusura: 45,        /* chi chiude a sera non entra a meno di 45 minuti dalla chiusura */
   /* stesso mercato, stessa direzione: quanto aspettare dopo una chiusura */
   pausaDopoChiusura: { swing: 20 * 3600000, intraday: 3600000, rapido: 15 * 60000 },

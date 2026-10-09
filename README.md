@@ -161,7 +161,7 @@ chiavi come segreti, apre la sessione con Capital.com e passa all'app solo
 quello che serve, da una lista di percorsi scritta nel codice. Quello che arriva
 da fuori (l'app, il browser) può **solo leggere**. Le uniche scritture verso
 Capital.com le fa il robot, quando lo accendi tu: aprire, spostare lo stop,
-chiudere. Non c'è un indirizzo del ponte che inoltri un ordine scelto da fuori.
+chiudere e, se lo chiedi all'avvio, alzare la leva al massimo. Non c'è un indirizzo del ponte che inoltri un ordine scelto da fuori.
 
 Ogni minuto guarda le posizioni aperte e, se il consiglio cambia, ti scrive su
 **Telegram**. Nello stesso giro guarda un mercato della lista, a rotazione, e se
@@ -179,7 +179,8 @@ chiusa. Il telefono lo accende, lo spegne e lo guarda.
 | Cosa | Come |
 |---|---|
 | Profilo | **Estremo**: segnali A, B e C, fino a 10 posizioni |
-| Quanto rischia | si ragiona sulla **perdita massima**, non sul budget del Colpo: un A rischia un quinto del tetto, un B il 15%, un C il 10% (con 50 CHF: 10, 7.50, 5). La taglia minima di Capital.com va bene fino a metà del tetto |
+| Quanto rischia | gioca per il massimo: si ragiona sulla **perdita massima**, non sul budget del Colpo. Un A rischia un terzo del tetto, un B un quarto, un C un sesto (con 60 CHF: 20, 15, 10). La taglia minima di Capital.com va bene fino a metà del tetto |
+| Leva | se lo scegli all'avvio, il robot alza la leva al **massimo che Capital.com ti concede** per ogni tipo di strumento. Con un conto piccolo è il margine (ne usa fino al 95%) moltiplicato per la leva a decidere quanto è grande una posizione |
 | Stile | quello che scegli prima di *Avvia*. Per entrare, incassare e uscire tante volte al giorno: **Rapido** (quarti d'ora, take profit a +1.5R, rientra sullo stesso mercato dopo un quarto d'ora) |
 | Quando entra | a rotazione, uno o due mercati della lista al minuto; solo se il segnale è pronto **e** il momento è "entra ora" (mai a prezzo scappato) |
 | Protezione | ogni posizione nasce con **stop loss** e **take profit** già su Capital.com: se il ponte si ferma, restano |
@@ -198,7 +199,7 @@ l'apertura del lunedì) può superarlo di quel tanto che nessuno stop può ferma
 
 ```bash
 node tools/test_motore.js      # 91 controlli sul motore
-node tools/test_ponte.mjs      # 97 controlli sul ponte, con un Capital.com finto che accetta ordini
+node tools/test_ponte.mjs      # 100 controlli sul ponte, con un Capital.com finto che accetta ordini
 node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 ```
 
