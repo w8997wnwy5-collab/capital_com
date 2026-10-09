@@ -259,6 +259,14 @@ function indicatori(cs, riferimento) {
   return ser;
 }
 
+/* Del riferimento il punteggio usa solo le chiusure e le medie a 20 e 50
+   (forza relativa e regime). Il ponte calcola solo quelle: costa un quarto
+   e il punteggio e' identico. */
+function riferimentoLeggero(cs) {
+  var k = colonne(cs);
+  return { k: k, ema20: ema(k.c, 20), ema50: ema(k.c, 50) };
+}
+
 /* Il riferimento (l'S&P 500, di solito) messo in fila con il titolo: per ogni
    candela del titolo, l'ultima candela del riferimento chiusa NON DOPO. */
 function allineaRiferimento(ser, rif) {
@@ -392,11 +400,18 @@ function punteggio(ser, t, extra) {
    candele e una di 400 possono dare punteggi diversi di qualche punto.
    Quattrocento bastano per la media a 200 e costano al ponte un terzo del
    calcolo: su Cloudflare gratis ogni giro ha dieci millisecondi. */
+/* Il RAPIDO e' il mordi e fuggi: legge i quarti d'ora, cerca il momento sui
+   cinque minuti, incassa tutto a +1.5R e non tiene niente piu' di due ore.
+   Ha regole sue (regole: qui sotto, il resto lo prende da REGOLE): stop piu'
+   vicino, pareggio presto, un solo obiettivo corto. Entra, guadagna, esce. */
 var STILI = {
   swing:    { nome: 'Swing', segnale: 'DAY', tempo: 'HOUR', candele: 1000, candeleVive: 400, candeleTempo: 300,
               barMs: 86400000, maxBarre: 20, orizzonte: 5, unita: 'giorni' },
   intraday: { nome: 'Intraday', segnale: 'HOUR', tempo: 'MINUTE_15', candele: 1000, candeleVive: 400, candeleTempo: 300,
-              barMs: 3600000, maxBarre: 7, orizzonte: 6, unita: 'ore', chiudiASera: true }
+              barMs: 3600000, maxBarre: 7, orizzonte: 6, unita: 'ore', chiudiASera: true },
+  rapido:   { nome: 'Rapido', segnale: 'MINUTE_15', tempo: 'MINUTE_5', candele: 1000, candeleVive: 400, candeleTempo: 300,
+              barMs: 900000, maxBarre: 8, orizzonte: 8, unita: 'quarti d\'ora', chiudiASera: true,
+              regole: { stopAtr: 1.2, tp1: 0.8, tp2: 1.5, trailAtr: 1.0, pareggioDa: 0.6 } }
 };
 
 /* Le regole d'uscita. Una sola tabella, usata dal piano, dal consiglio e dal
@@ -418,6 +433,24 @@ var REGOLE = {
      d'apertura escono gia' all'apertura, peggio). */
   slittamentoAtr: 0.05
 };
+
+/* Le regole di uno stile: le sue dove le ha, le altre da REGOLE. Si
+   calcolano una volta qui, cosi' piano, consiglio e backtest leggono la
+   stessa tabella. */
+var REGOLE_STILE = {};
+(function () {
+  for (var nome in STILI) {
+    if (!STILI.hasOwnProperty(nome)) continue;
+    var proprie = STILI[nome].regole || {}, r = {};
+    for (var k in REGOLE) if (REGOLE.hasOwnProperty(k)) r[k] = proprie.hasOwnProperty(k) ? proprie[k] : REGOLE[k];
+    REGOLE_STILE[nome] = r;
+  }
+})();
+function regoleDi(stile) {
+  if (typeof stile === 'string') return REGOLE_STILE[stile] || REGOLE;
+  for (var nome in STILI) if (STILI[nome] === stile) return REGOLE_STILE[nome];
+  return REGOLE;
+}
 
 /* Medio-alto e' il predefinito: lo hai chiesto tu. Il rischio e' la quota
    del budget che si perde se lo stop scatta; la leva non c'entra. */
@@ -628,13 +661,14 @@ function tempismo(an, ct, prezzoVivo) {
      dir         per forzare una direzione (di solito quella del segnale) */
 function piano(inp) {
   var an = inp.an, prof = PROFILI[inp.profilo] || PROFILI.aggressivo, stile = STILI[inp.stile] || STILI.swing;
+  var RG = regoleDi(stile);
   var str = inp.strumento || {}, cambio = finito(inp.cambio) && inp.cambio > 0 ? inp.cambio : 1;
   var budget = Math.max(0, +inp.budget || 0);
   var dir = inp.dir || an.dir || 1;
   var grado = an.grado || '';
   var tm = inp.tempismo || an.tempismo || { tipo: 'mercato', livello: an.prezzo + dir * an.spread / 2 };
   var entrata = tm.livello;
-  var R = REGOLE.stopAtr * an.atr;
+  var R = RG.stopAtr * an.atr;
   var avvisi = [];
 
   /* la distanza minima dello stop la decide Capital.com */
@@ -643,7 +677,7 @@ function piano(inp) {
     avvisi.push('Capital.com vuole lo stop ad almeno ' + str.distMinStopPerc + '% dal prezzo: allargato.');
   }
   var stop = entrata - dir * R;
-  var tp1 = entrata + dir * REGOLE.tp1 * R, tp2 = entrata + dir * REGOLE.tp2 * R;
+  var tp1 = entrata + dir * RG.tp1 * R, tp2 = entrata + dir * RG.tp2 * R;
 
   var ammesso = grado && prof.gradi.indexOf(grado) >= 0 && dir === an.dir;
   var moltGrado = PESO_GRADO[grado] || 0.5;
@@ -678,8 +712,8 @@ function piano(inp) {
   var valore = dim * entrata * cambio;
   var margine = margineDi(dim);
   var perdita = dim * R * cambio;
-  var guadagnoTp1 = dim * REGOLE.tp1 * R * cambio;
-  var guadagnoPiano = dim * (0.5 * REGOLE.tp1 + 0.5 * REGOLE.tp2) * R * cambio;
+  var guadagnoTp1 = dim * RG.tp1 * R * cambio;
+  var guadagnoPiano = dim * (0.5 * RG.tp1 + 0.5 * RG.tp2) * R * cambio;
   var notte = inp.notte || NOTTE_PREDEFINITA;
   var costoNotte = valore * (dir > 0 ? notte.lungo : notte.corto);
 
@@ -753,7 +787,7 @@ var VERDETTI = {
 };
 
 function consiglio(inp) {
-  var pos = inp.pos, an = inp.an, stile = STILI[inp.stile] || STILI.swing;
+  var pos = inp.pos, an = inp.an, stile = STILI[inp.stile] || STILI.swing, RG = regoleDi(stile);
   var dir = pos.dir, entrata = pos.entrata, ora = inp.ora || Date.now();
   var bid = inp.prezzo && finito(inp.prezzo.bid) ? inp.prezzo.bid : (an ? an.prezzo : entrata);
   var ask = inp.prezzo && finito(inp.prezzo.ask) ? inp.prezzo.ask : bid;
@@ -765,8 +799,8 @@ function consiglio(inp) {
      su Capital.com, altrimenti dalla regola (1.5 ATR). */
   var R = pos.R > 0 ? pos.R
         : (finito(pos.stopIniziale) ? Math.abs(entrata - pos.stopIniziale)
-        : (finito(pos.stop) && (pos.stop - entrata) * dir < 0 ? Math.abs(entrata - pos.stop) : REGOLE.stopAtr * atrS));
-  if (!(R > 0)) R = REGOLE.stopAtr * atrS;
+        : (finito(pos.stop) && (pos.stop - entrata) * dir < 0 ? Math.abs(entrata - pos.stop) : RG.stopAtr * atrS));
+  if (!(R > 0)) R = RG.stopAtr * atrS;
   var stopIniziale = entrata - dir * R;
 
   /* il meglio visto dall'entrata: dalle candele, piu' il prezzo di adesso */
@@ -785,15 +819,15 @@ function consiglio(inp) {
   /* lo stop che si dovrebbe avere adesso: sale e non scende mai, perche'
      dipende solo dal massimo raggiunto, che non scende mai */
   var stopRegola = stopIniziale, faseStop = 'iniziale';
-  if (rMax >= REGOLE.pareggioDa) { stopRegola = entrata + dir * 0.05 * R; faseStop = 'pareggio'; }
-  if (rMax >= REGOLE.tp1) {
-    var insegue = meglio - dir * REGOLE.trailAtr * atrS;
+  if (rMax >= RG.pareggioDa) { stopRegola = entrata + dir * 0.05 * R; faseStop = 'pareggio'; }
+  if (rMax >= RG.tp1) {
+    var insegue = meglio - dir * RG.trailAtr * atrS;
     if ((insegue - stopRegola) * dir > 0) { stopRegola = insegue; faseStop = 'insegue'; }
   }
   var stopAttuale = finito(pos.stop) ? pos.stop : null;
   var stopEff = stopAttuale != null && (stopAttuale - stopRegola) * dir > 0 ? stopAttuale : stopRegola;
 
-  var tp1 = entrata + dir * REGOLE.tp1 * R, tp2 = entrata + dir * REGOLE.tp2 * R;
+  var tp1 = entrata + dir * RG.tp1 * R, tp2 = entrata + dir * RG.tp2 * R;
   var pnl = (uscita - entrata) * dir * pos.dim;
   var punti = an && an.ok ? an.punti : null;
   var conDir = punti != null ? punti * dir : null;
@@ -823,43 +857,43 @@ function consiglio(inp) {
     decidi('esci', 'Chiude fra ' + Math.max(1, Math.round((orario.chiude - ora) / 60000)) + ' minuti: in intraday non si dorme dentro.');
   }
   /* 5. secondo incasso */
-  if (rOra >= REGOLE.tp2) {
+  if (rOra >= RG.tp2) {
     decidi('incassa', 'Obiettivo pieno raggiunto: +' + fmtNum(rOra, 1) + 'R. Chiudi il resto, oppure lascia una coda con lo stop a ' +
       fmtPrezzo(stopRegola) + '.');
   }
   /* 6. primo incasso */
-  if (rMax >= REGOLE.tp1 && !pos.parziale) {
+  if (rMax >= RG.tp1 && !pos.parziale) {
     decidi('meta', 'Toccato il primo obiettivo (' + fmtPrezzo(tp1) + '). Chiudi meta\' e porta lo stop a ' + fmtPrezzo(stopRegola) +
       ': da qui in poi il colpo non puo\' piu\' perdere.');
   }
   /* 7. lo stop da spostare */
   var guadagnoStop = stopAttuale == null ? Infinity : (stopRegola - stopAttuale) * dir / R;
-  if (rMax >= REGOLE.pareggioDa && guadagnoStop >= 0.25) {
+  if (rMax >= RG.pareggioDa && guadagnoStop >= 0.25) {
     decidi('stop', 'Porta lo stop a ' + fmtPrezzo(stopRegola) +
       (faseStop === 'pareggio' ? ' (pareggio): il peggio che puo\' succedere adesso e\' uscire pari.'
-                               : ': insegue il prezzo a ' + REGOLE.trailAtr + ' ATR dal massimo.'));
+                               : ': insegue il prezzo a ' + RG.trailAtr + ' ATR dal massimo.'));
   }
   /* 8. rinforzare: solo PRIMA del primo incasso. Dopo, la posizione si
      alleggerisce; prendere meta' e ricomprarla nello stesso giro vuol dire
      pagare due volte lo spread per restare dove si era. */
-  if (rOra >= REGOLE.rinforzaDa && rMax < REGOLE.tp1 && !pos.parziale && conDir != null && conDir >= 55 && !pos.rinforzata) {
+  if (rOra >= RG.rinforzaDa && rMax < RG.tp1 && !pos.parziale && conDir != null && conDir >= 55 && !pos.rinforzata) {
     decidi('rinforza', 'Sei a +' + fmtNum(rOra, 1) + 'R e il segnale e\' ancora A (' + segno(punti) + '). Aggiungi meta\' della taglia (' +
       fmtNum(giuAlPasso(pos.dim / 2, pos.passo || 0.01), 2) + ') con lo stop di tutto a ' + fmtPrezzo(stopRegola) + '.');
   }
 
   /* l'attenzione: non cambia il verdetto se ce n'e' gia' uno, ma si scrive */
   var distStopR = (uscita - stopEff) * dir / R;
-  if (distStopR > 0 && distStopR < REGOLE.vicinoStop) motivi.push('A ' + fmtNum(distStopR, 2) + 'R dallo stop.');
+  if (distStopR > 0 && distStopR < RG.vicinoStop) motivi.push('A ' + fmtNum(distStopR, 2) + 'R dallo stop.');
   if (conDir != null && conDir < 15 && conDir > -SOGLIA_GIRO) motivi.push('La spinta si sta spegnendo: punteggio ' + segno(punti) + '.');
   var barre = Math.max(0, (ora - pos.aperta) / stile.barMs);
   if (barre > stile.maxBarre) motivi.push('Dentro da ' + Math.round(barre) + ' ' + stile.unita + ': oltre il tempo massimo del piano (' + stile.maxBarre + ').');
   var dataOra = new Date(ora);
-  if (!stile.chiudiASera && dataOra.getUTCDay() === 5 && dataOra.getUTCHours() >= 17 && rOra < REGOLE.pareggioDa) {
+  if (!stile.chiudiASera && dataOra.getUTCDay() === 5 && dataOra.getUTCHours() >= 17 && rOra < RG.pareggioDa) {
     motivi.push('Venerdi\' sera: il weekend puo\' aprire lunedi\' con un buco oltre lo stop.');
   }
   if (motivi.length) decidi('attento', motivi[0]);
   decidi('tieni', rOra >= 0
-    ? 'Tutto secondo il piano. Prossimo passo a ' + fmtPrezzo(rMax >= REGOLE.tp1 ? tp2 : tp1) + '.'
+    ? 'Tutto secondo il piano. Prossimo passo a ' + fmtPrezzo(rMax >= RG.tp1 ? tp2 : tp1) + '.'
     : 'Sotto, ma dentro il rischio previsto. Lo stop sta a ' + fmtPrezzo(stopEff) + '.');
 
   /* sempre: la situazione in chiaro */
@@ -879,11 +913,11 @@ function consiglio(inp) {
 /* Il rischio iniziale di una posizione presa senza piano e senza stop: la
    regola (1.5 ATR) con l'ATR dell'ultima candela CHIUSA prima dell'entrata.
    Quella del giorno stesso conterrebbe gia' il dopo. */
-function rischioIniziale(cs, ser, aperta) {
+function rischioIniziale(cs, ser, aperta, stile) {
   var d = barraMs(cs), t = cs.length - 1;
   while (t > 0 && cs[t].t + d > aperta) t--;
   var a = ser.atr[t];
-  return finito(a) && a > 0 ? REGOLE.stopAtr * a : null;
+  return finito(a) && a > 0 ? regoleDi(stile || 'swing').stopAtr * a : null;
 }
 
 /* ─────────────────────────── il robot ───────────────────────────
@@ -899,28 +933,36 @@ function rischioIniziale(cs, ser, aperta) {
    stop a pareggio, stop che insegue, uscita se il segnale si gira — lo fa il
    ponte, con le stesse regole del consiglio e del backtest (unaSola).
 
-   Il tetto: il robot non mette mai a rischio piu' di quanto resta della
-   perdita massima che hai scelto. Se scattassero tutti gli stop insieme
-   arriveresti al tetto, non oltre — salvo i buchi di prezzo, che nessuno
-   stop puo' fermare. */
+   La taglia si ragiona sul TETTO, la perdita massima che scegli tu, non sul
+   budget del Colpo: e' quella la cifra che hai deciso di poter perdere. Un
+   A rischia un quinto del tetto, un B 15%, un C un decimo. La taglia minima
+   di Capital.com si accetta anche se rischia di piu', fino a meta' del
+   tetto. E il robot non mette mai a rischio piu' di quanto resta del tetto:
+   se scattassero tutti gli stop insieme arriveresti li', non oltre — salvo
+   i buchi di prezzo, che nessuno stop puo' fermare. */
 
 var ROBOT = {
   profilo: 'estremo',
+  quotaColpo: 0.2,                /* il rischio di un A, in quota del tetto (B 3/4, C 1/2) */
+  colpoMax: 0.5,                  /* con la taglia minima un colpo puo' rischiare fino a meta' del tetto */
   margineUsabile: 0.9,            /* del margine disponibile sul conto: il resto e' cuscinetto */
-  minutiPrimaChiusura: 45,        /* in intraday non si entra a meno di 45 minuti dalla chiusura */
-  pausaDopoChiusura: { swing: 20 * 3600000, intraday: 3600000 },  /* stesso mercato, stessa direzione */
-  minimoFinoA: 2,                 /* la taglia minima si accetta se rischia al massimo il doppio del previsto */
+  minutiPrimaChiusura: 45,        /* chi chiude a sera non entra a meno di 45 minuti dalla chiusura */
+  /* stesso mercato, stessa direzione: quanto aspettare dopo una chiusura */
+  pausaDopoChiusura: { swing: 20 * 3600000, intraday: 3600000, rapido: 15 * 60000 },
   stopMinimo: 0.2                 /* lo stop si sposta solo se migliora di almeno 0.2R */
 };
+
+/* Quanto rischia il robot su un colpo di questo grado, con questo tetto. */
+function rischioRobot(tetto, grado) { return Math.max(0, +tetto || 0) * ROBOT.quotaColpo * (PESO_GRADO[grado] || 0.5); }
 
 function robotEntrata(inp) {
   var an = inp.an, p = inp.piano, st = inp.stato || {}, ora = inp.ora || Date.now();
   var stile = STILI[inp.stile] ? inp.stile : 'swing';
   var no = function (m) { return { apri: false, motivo: m }; };
   if (!an || !an.ok) return no((an && an.motivo) || 'nessuna analisi');
-  if (!pronto(an, ROBOT.profilo)) return no('nessun segnale (' + segno(an.punti) + ')');
+  if (!pronto(an, ROBOT.profilo)) return no('nessun segnale (' + segno(an.punti) + ', serve almeno ' + sogliaProfilo(ROBOT.profilo) + ')');
   if (!p || !(p.R > 0) || !(p.entrata > 0)) return no('piano non calcolabile');
-  if (p.tipo !== 'mercato') return no(p.tipo === 'limite' ? 'prezzo scappato: aspetta che torni' : 'aspetta la rottura');
+  if (p.tipo !== 'mercato') return no(p.tipo === 'limite' ? 'segnale ' + an.grado + ' ma prezzo scappato: aspetta che torni' : 'segnale ' + an.grado + ' a un passo dalla rottura: aspetta che rompa');
   if (inp.giaDentro) return no('gia\' dentro su questo mercato');
   var rec = inp.chiusaDiRecente;
   if (rec && rec.dir === an.dir && ora - rec.quando < ROBOT.pausaDopoChiusura[stile]) return no('chiusa da poco nella stessa direzione');
@@ -930,20 +972,21 @@ function robotEntrata(inp) {
     if (STILI[stile].chiudiASera && inp.orario.chiude && inp.orario.chiude - ora < ROBOT.minutiPrimaChiusura * 60000) return no('chiude fra poco');
   }
   var passo = p.passo > 0 ? p.passo : 0.01, dimMin = p.dimMin > 0 ? p.dimMin : 0;
-  var cambio = p.cambio > 0 ? p.cambio : 1;
+  var cambio = p.cambio > 0 ? p.cambio : 1, tetto = +st.tetto > 0 ? +st.tetto : 0;
   var rischioUnita = p.R * cambio, margineUnita = p.entrata * cambio / (p.leva > 0 ? p.leva : 1);
-  var dim = p.dim;
+  var voluto = rischioRobot(tetto, an.grado);
+  var dim = giuAlPasso(voluto / rischioUnita, passo);
   if (!(dim > 0) || dim < dimMin) {
-    /* sotto la taglia minima: la minima va bene solo se non rischia troppo */
-    if (dimMin > 0 && dimMin * rischioUnita <= ROBOT.minimoFinoA * p.rischioSoldi) dim = dimMin;
-    else return no('taglia minima troppo grossa per il budget');
+    /* sotto la taglia minima: la minima va bene finche' rischia al massimo meta' del tetto */
+    if (dimMin > 0 && dimMin * rischioUnita <= ROBOT.colpoMax * tetto + 1e-9) dim = dimMin;
+    else return no('taglia minima troppo grossa: rischierebbe ' + fmtNum(Math.max(dimMin, passo) * rischioUnita, 2) + ', oltre meta\' del tetto');
   }
   var spazio = (st.residuo || 0) - (st.rischioAperto || 0);
   if (dim * rischioUnita > spazio) dim = giuAlPasso(Math.max(0, spazio) / rischioUnita, passo);
   if (!(dim > 0) || dim < dimMin) return no('tetto di perdita: restano ' + fmtNum(Math.max(0, spazio), 2) + ' da rischiare');
   var usabile = (st.disponibile || 0) * ROBOT.margineUsabile;
   if (dim * margineUnita > usabile) dim = giuAlPasso(Math.max(0, usabile) / margineUnita, passo);
-  if (!(dim > 0) || dim < dimMin) return no('margine finito sul conto');
+  if (!(dim > 0) || dim < dimMin) return no('margine finito sul conto (servono ' + fmtNum(Math.max(dimMin, passo) * margineUnita, 2) + ', liberi ' + fmtNum(usabile, 2) + ')');
   return { apri: true, dim: dim, dir: an.dir, stop: p.stop, tp: p.tp2, R: p.R, entrata: p.entrata,
            rischio: dim * rischioUnita, margine: dim * margineUnita, motivo: p.motivoTempo || '' };
 }
@@ -987,7 +1030,7 @@ function barraMs(cs) {
    aver guadagnato quanto si rischiava. */
 function backtest(cs, opz) {
   opz = opz || {};
-  var stile = STILI[opz.stile] || STILI.swing;
+  var stile = STILI[opz.stile] || STILI.swing, RG = regoleDi(stile);
   var ser = opz.ser || indicatori(cs, opz.rif || null);
   var k = ser.k, n = k.n;
   var soglia = finito(opz.soglia) ? opz.soglia : 40;
@@ -1008,10 +1051,10 @@ function backtest(cs, opz) {
     var dir = p > 0 ? 1 : -1;
     var mezzoSp = senzaCosti ? 0 : k.s[t + 1] / 2;
     var entrata = k.o[t + 1] + dir * mezzoSp;
-    var R = REGOLE.stopAtr * ser.atr[t];
+    var R = RG.stopAtr * ser.atr[t];
     if (!(R > 0)) continue;
     aperto = { t: t + 1, dir: dir, entrata: entrata, R: R, stop: entrata - dir * R,
-               tp1: entrata + dir * REGOLE.tp1 * R, tp2: entrata + dir * REGOLE.tp2 * R,
+               tp1: entrata + dir * RG.tp1 * R, tp2: entrata + dir * RG.tp2 * R,
                meta: false, uscitaMeta: null, meglio: entrata, punti: p, grado: gradoDi(p), tp1Toccato: false };
     var j, esito = null, prezzoUscita = null, notti = 0;
     for (j = t + 1; j < n; j++) {
@@ -1025,7 +1068,7 @@ function backtest(cs, opz) {
       /* il buco: apre gia' oltre lo stop */
       if ((oE - aperto.stop) * dir <= 0) { esito = 'stop'; prezzoUscita = oE; break; }
       if ((contrario - aperto.stop) * dir <= 0) {
-        var slip = senzaCosti ? 0 : REGOLE.slittamentoAtr * (finito(ser.atr[j]) ? ser.atr[j] : 0);
+        var slip = senzaCosti ? 0 : RG.slittamentoAtr * (finito(ser.atr[j]) ? ser.atr[j] : 0);
         esito = 'stop';
         prezzoUscita = dir > 0 ? Math.max(aperto.stop - slip, lE) : Math.min(aperto.stop + slip, hE);
         break;
@@ -1040,9 +1083,9 @@ function backtest(cs, opz) {
       /* fine candela: il meglio visto, lo stop che insegue, il segnale, il tempo */
       if ((favorevole - aperto.meglio) * dir > 0) aperto.meglio = favorevole;
       var rMax = (aperto.meglio - entrata) * dir / R;
-      if (rMax >= REGOLE.pareggioDa && (entrata + dir * 0.05 * R - aperto.stop) * dir > 0) aperto.stop = entrata + dir * 0.05 * R;
-      if (rMax >= REGOLE.tp1) {
-        var ins = aperto.meglio - dir * REGOLE.trailAtr * ser.atr[j];
+      if (rMax >= RG.pareggioDa && (entrata + dir * 0.05 * R - aperto.stop) * dir > 0) aperto.stop = entrata + dir * 0.05 * R;
+      if (rMax >= RG.tp1) {
+        var ins = aperto.meglio - dir * RG.trailAtr * ser.atr[j];
         if ((ins - aperto.stop) * dir > 0) aperto.stop = ins;
       }
       if (finito(punti[j]) && punti[j] * dir <= -SOGLIA_GIRO && j + 1 < n) {
@@ -1198,7 +1241,8 @@ var API = {
   parti: parti, punteggio: punteggio, gradoDi: gradoDi, letturaFolla: letturaFolla,
   analizza: analizza, tempismo: tempismo, piano: piano, ripartisci: ripartisci, consiglio: consiglio,
   pronto: pronto, sogliaProfilo: sogliaProfilo, strumentoDa: strumentoDa, notteDa: notteDa,
-  robotEntrata: robotEntrata, robotUscita: robotUscita, ROBOT: ROBOT,
+  robotEntrata: robotEntrata, robotUscita: robotUscita, rischioRobot: rischioRobot, ROBOT: ROBOT,
+  regoleDi: regoleDi, riferimentoLeggero: riferimentoLeggero,
   backtest: backtest, riassumi: riassumi, calibra: calibra, portafoglio: portafoglio,
   derive: derive, calibraDerive: calibraDerive, previsione: previsione,
   orari: orari, barraMs: barraMs, giuAlPasso: giuAlPasso, rischioIniziale: rischioIniziale,

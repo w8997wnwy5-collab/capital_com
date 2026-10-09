@@ -92,8 +92,11 @@ La direzione la dice la scala lunga, il momento la scala corta.
 - **Se rompe**: è a un passo dal massimo di 20 candele. Ordine stop appena sopra:
   si entra solo se rompe davvero.
 
-Due stili: **Swing** (segnale sulle giornaliere, momento sulle orarie, da qualche
-giorno a tre settimane) e **Intraday** (orarie e quarti d'ora, fuori prima della chiusura).
+Tre stili: **Swing** (segnale sulle giornaliere, momento sulle orarie, da qualche
+giorno a tre settimane), **Intraday** (orarie e quarti d'ora, fuori prima della
+chiusura) e **Rapido**, il mordi e fuggi: segnale sui quarti d'ora, momento sui
+cinque minuti, stop a 1.2 ATR, pareggio a +0.6R, tutto incassato a +1.5R, mai
+più di due ore dentro, fuori prima di sera. Entra, guadagna, esce.
 
 ### Quanto mettere
 
@@ -123,7 +126,11 @@ Una regola sola, usata uguale dal piano, dal consiglio e dal backtest:
 | a +3.5R | si **incassa** il resto |
 | se il segnale si gira | (grado C dall'altra parte) si **esce**, anche in guadagno |
 | candela violenta contro | si esce senza aspettare lo stop |
-| intraday, 20 minuti alla chiusura | fuori |
+| intraday e rapido, 20 minuti alla chiusura | fuori |
+
+Il **Rapido** ha regole sue, più corte: stop a 1.2 ATR, pareggio a +0.6R, lo
+stop che insegue da +0.8R a 1 ATR, obiettivo pieno a +1.5R, al massimo otto
+quarti d'ora.
 
 Il consiglio non ha memoria: si ricava tutto dal prezzo d'entrata e dalle
 candele dopo. Così il telefono e il ponte arrivano alla stessa risposta senza parlarsi.
@@ -171,24 +178,27 @@ chiusa. Il telefono lo accende, lo spegne e lo guarda.
 
 | Cosa | Come |
 |---|---|
-| Profilo | **Estremo**: segnali A, B e C, 10% del budget a colpo su un A (7.5% B, 5% C), fino a 10 posizioni |
-| Quando entra | un mercato della lista al minuto, a rotazione; solo se il segnale è pronto **e** il momento è "entra ora" (mai a prezzo scappato) |
-| Protezione | ogni posizione nasce con **stop loss** (1.5 ATR) e **take profit** (3.5R) già su Capital.com: se il ponte si ferma, restano |
-| Gestione | a +1R stop a pareggio, da +1.5R lo stop insegue a 2.5 ATR; esce se il segnale si gira, dopo il tempo massimo, prima della chiusura in intraday. Una posizione sola per colpo: niente metà |
+| Profilo | **Estremo**: segnali A, B e C, fino a 10 posizioni |
+| Quanto rischia | si ragiona sulla **perdita massima**, non sul budget del Colpo: un A rischia un quinto del tetto, un B il 15%, un C il 10% (con 50 CHF: 10, 7.50, 5). La taglia minima di Capital.com va bene fino a metà del tetto |
+| Stile | quello che scegli prima di *Avvia*. Per entrare, incassare e uscire tante volte al giorno: **Rapido** (quarti d'ora, take profit a +1.5R, rientra sullo stesso mercato dopo un quarto d'ora) |
+| Quando entra | a rotazione, uno o due mercati della lista al minuto; solo se il segnale è pronto **e** il momento è "entra ora" (mai a prezzo scappato) |
+| Protezione | ogni posizione nasce con **stop loss** e **take profit** già su Capital.com: se il ponte si ferma, restano |
+| Gestione | stop a pareggio, poi lo stop che insegue; esce se il segnale si gira, dopo il tempo massimo, prima della chiusura. Una posizione sola per colpo: niente metà |
+| Perché non entra | nella scheda Robot, *Cosa sta guardando*: per ogni mercato il punteggio e il motivo (nessun segnale, prezzo scappato, chiuso, margine finito…). Su Telegram: `/stato` |
+| Il cron gira? | *Avvia* scrive un comando che applica il giro del minuto: è lui che manda **ROBOT ACCESO** su Telegram. Se l'app resta su *Si sta accendendo* più di due minuti, su Cloudflare manca il Cron Trigger, e l'app lo dice |
 | Tetto | non mette mai a rischio più di quanto resta della **perdita massima**; se la perdita dall'avvio la raggiunge, si ferma e chiude tutto. Il tetto conta da quando premi *Avvia* e guarda tutto il conto |
 | Ferma | *Ferma*: non apre più niente, le posizioni aperte le porta a fine. *Ferma e chiudi tutto*: chiude subito. Da Telegram `/stop` e `/chiudi` |
 | Le tue posizioni | non le tocca |
 
-Con un conto piccolo le taglie minime e il margine decidono quante posizioni apre
-davvero: una taglia minima si accetta solo se rischia al massimo il doppio del
-previsto. Il tetto ferma le perdite normali; un buco di prezzo (una notizia,
+Con un conto piccolo il margine decide quante posizioni apre davvero: il robot ne
+usa al massimo il 90%. Il tetto ferma le perdite normali; un buco di prezzo (una notizia,
 l'apertura del lunedì) può superarlo di quel tanto che nessuno stop può fermare.
 
 ## Come è verificato
 
 ```bash
-node tools/test_motore.js      # 84 controlli sul motore
-node tools/test_ponte.mjs      # 70 controlli sul ponte, con un Capital.com finto che accetta ordini
+node tools/test_motore.js      # 91 controlli sul motore
+node tools/test_ponte.mjs      # 93 controlli sul ponte, con un Capital.com finto che accetta ordini
 node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 ```
 
@@ -197,6 +207,7 @@ node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 | EMA, RSI, ATR contro un'implementazione scritta a parte | scarto 0 |
 | Il punteggio alla candela t, tagliando la storia a t (anche l'indice) | identico: nessuno sguardo nel futuro |
 | Passeggiata a caso senza costi, 6'500 colpi (anche con le regole del robot) | R medio −0.01 e −0.02, t = −0.7 e −1.2: compatibile con zero, come deve |
+| Lo stesso con le regole del Rapido, 16'000 colpi sui quarti d'ora | R medio +0.001, t = 0.2: zero |
 | Ogni prezzo d'entrata e d'uscita del backtest dentro la sua candela | 0 fuori su 13'000 |
 | Aggiungere lo spread | il risultato peggiora, mai migliora |
 | Il ponte: percorsi non in lista, scritture verso Capital.com, altri siti, codici sbagliati | tutti respinti |
@@ -207,6 +218,10 @@ node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 | Il robot: doppioni, stop, chiusure di Capital.com | nessun doppione; stop a pareggio una volta sola; si accorge delle chiusure |
 | Il robot: tetto di perdita | si ferma, chiude tutto e non apre più niente |
 | Il robot: comandi Telegram | solo dalla tua chat, con percorso e intestazione segreti |
+| Il robot: un Ferma durante un giro, o un attimo prima di un ordine | non si perde: il giro dopo lo applica, l'ordine non parte |
+| Il robot: ordine partito senza conferma | lo stato è salvato prima dell'ordine; il giro dopo adotta la posizione, senza un secondo ordine |
+| Il robot: ordine rifiutato | l'errore si scrive una volta, quel mercato si lascia stare mezz'ora |
+| Il robot: scritture in KV | con niente da fare, una ogni cinque minuti |
 
 Il test sulla passeggiata a caso è quello decisivo: su un mercato senza memoria
 nessuna regola può guadagnare. Se il backtest dicesse il contrario, starebbe barando.
@@ -251,10 +266,10 @@ clienti (`/clientsentiment`), posizioni aperte (`/positions`), conto e leve
 - **Scritto `ESEMPIO` in alto**: l'app non è collegata. Scheda **Ponte**, indirizzo e codice, **Collega**.
 - **Un mercato «non letto»**: sul tuo conto quell'epic non esiste o ha un nome diverso. Toglilo e cercalo da **Ponte › Cerca**.
 - **Nessuna posizione in *In gioco*, ma su Capital.com ce l'hai**: controlla che il ponte sia sul conto giusto (`CAPITAL_DEMO`: `1` demo, `0` reale).
-- **Il consiglio sul telefono e quello su Telegram non coincidono**: lo stile (Swing o Intraday) si cambia dall'app, che lo passa al ponte per le posizioni aperte. Le posizioni aperte *prima* di collegare la memoria il ponte le legge con lo stile predefinito, Swing.
+- **Il consiglio sul telefono e quello su Telegram non coincidono**: lo stile (Swing, Intraday o Rapido) si cambia dall'app, che lo passa al ponte per le posizioni aperte. Le posizioni aperte *prima* di collegare la memoria il ponte le legge con lo stile predefinito, Swing.
 - **Gli avvisi arrivano solo con l'app aperta**: quelli del telefono sì, è il telefono che addormenta le app. Quelli sicuri sono su Telegram.
 - **La scheda Robot dice "ponte vecchio"**: ricopia `server/worker.js` su Cloudflare (Edit code › incolla › Deploy).
-- **Il robot è acceso ma non apre niente**: nel diario c'è il motivo dell'ultimo mercato guardato. Di solito: nessun segnale pronto, prezzo scappato, mercato chiuso, taglia minima troppo grossa per il budget, margine finito.
+- **Il robot è acceso ma non apre niente**: scheda Robot, *Cosa sta guardando*: per ogni mercato c'è il motivo. Di solito: nessun segnale pronto, prezzo scappato, mercato chiuso, margine finito. Se in alto c'è un avviso rosso «il robot non gira», manca l'orologio (Cron Trigger `* * * * *`) su Cloudflare.
 - Tutto il resto del ponte: [`server/COME-SI-ACCENDE.md`](server/COME-SI-ACCENDE.md#se-qualcosa-non-va).
 
 ## Avvertenza

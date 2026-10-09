@@ -63,7 +63,7 @@ const telegrammi = [];
    (riferimento subito, esito su /confirms), e li mette nelle posizioni. Il
    conto scende col margine usato; il risultato aperto si comanda da qui. */
 const ORA_DATI = Date.UTC(2026, 9, 7, 16, 0);
-const broker = { pos: [], conferme: {}, n: 0, prezzi: {}, ordini: [], modifiche: [], chiusure: [], ora: ORA_DATI };
+const broker = { pos: [], conferme: {}, n: 0, prezzi: {}, ordini: [], modifiche: [], chiusure: [], rifiutati: [], ora: ORA_DATI };
 const contoFinto = { pnl: 0, disponibile: 59 };
 const rispondi = (dati, stato = 200) => new Response(JSON.stringify(dati), { status: stato });
 function mercatoFinto(epic) {
@@ -75,6 +75,12 @@ function mercatoFinto(epic) {
 }
 async function brokerFinto(percorso, metodo, init) {
   if (percorso === 'positions' && metodo === 'POST') {
+    if (broker.rifiuta) {
+      const ref = 'r_' + (++broker.n);
+      broker.rifiutati.push(JSON.parse(init.body));
+      broker.conferme[ref] = { dealStatus: 'REJECTED', reason: 'RISK_CHECK' };
+      return rispondi({ dealReference: ref });
+    }
     const b = JSON.parse(init.body), m = mercatoFinto(b.epic), n = ++broker.n;
     const id = 'robot-' + n, ref = 'o_' + n, livello = b.direction === 'BUY' ? m.offer : m.bid;
     broker.ordini.push(b);
@@ -101,6 +107,7 @@ async function brokerFinto(percorso, metodo, init) {
     return rispondi({ dealReference: ref });
   }
   const mc = /^confirms\/(.+)$/.exec(percorso);
+  if (mc && broker.confermeRotte) return rispondi({ errorCode: 'error.service.unavailable' }, 500);
   if (mc) { const c = broker.conferme[decodeURIComponent(mc[1])]; return c ? rispondi(c) : rispondi({ errorCode: 'error.not-found.dealReference' }, 404); }
   if (percorso === 'positions' && metodo === 'GET') {
     const base = E.risposta('positions', {}, ORA_DATI);
@@ -121,7 +128,11 @@ function kv() {
   const m = new Map();
   return {
     m, scritture: 0,
-    async get(k, tipo) { const v = m.get(k); return v == null ? null : (tipo === 'json' ? JSON.parse(v) : v); },
+    gancio: null,
+    async get(k, tipo) {
+      if (this.gancio && this.gancio(k)) this.gancio = null;
+      const v = m.get(k); return v == null ? null : (tipo === 'json' ? JSON.parse(v) : v);
+    },
     async put(k, v) { this.scritture++; m.set(k, v); },
     async delete(k) { m.delete(k); },
   };
@@ -293,28 +304,38 @@ prova('con un budget sotto la taglia minima nessun avviso', entra.length === 0, 
 /* ── il robot ── */
 const AZ = AZIONI, nAz = AZ.length;
 const robotKV = () => JSON.parse(kvm.get('robot') || 'null');
+const comandoKV = () => JSON.parse(kvm.get('robot:comando') || 'null');
 /* un giro alla volta, aspettando che finisca (cron, sopra): come su
    Cloudflare, dove i giri partono a un minuto l'uno dall'altro */
 async function giroRobot(inizio, minuti) {
   for (let i = 0; i < minuti; i++) { broker.ora = inizio + i * 60000; await cron(broker.ora); }
 }
 const ciclo = k => (Math.floor(ORA_DATI / 60000 / nAz) + k) * nAz * 60000;
+/* un'ora precisa, Wall Street aperta (13:30-20:00 UTC, lunedi'-venerdi') */
+const alle = (giorno, ore, minuti = 0) => Date.UTC(2026, 9, giorno, ore, minuti);
 const nonGetPrimaRobot = chiamate.filter(c => c.url.startsWith(DEMO) && c.metodo !== 'GET' && !c.url.endsWith('/session')).length;
 prova('prima di accendere il robot, nessuna scrittura verso Capital.com', nonGetPrimaRobot === 0, nonGetPrimaRobot);
 
 telegrammi.length = 0;
 r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { budget: 100, perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: AZ, riferimento: 'US500' } });
-prova('il robot si accende e fissa il punto di partenza (patrimonio 10000)', r.stato === 200 && r.d.robot.acceso && r.d.robot.capitaleIniziale === 10000 &&
-      r.d.robot.perditaMax === 50, JSON.stringify(r.d.robot && { acceso: r.d.robot.acceso, cap: r.d.robot.capitaleIniziale }));
+prova('Avvia scrive il comando, non lo stato (lo stato lo scrive solo il giro)', r.stato === 200 && r.d.comando && r.d.comando.azione === 'avvia' && !kvm.has('robot') &&
+      comandoKV().capitaleIniziale === 10000 && comandoKV().impostazioni.perditaMax === 50, JSON.stringify(r.d));
 const hook = telegrammi.find(t => t.url && t.secret_token);
 prova('il webhook di Telegram punta a un percorso segreto, con intestazione segreta', !!hook && hook.url.startsWith('https://mirino.esempio.workers.dev/tg/') &&
       hook.url.length > 60 && hook.secret_token.length >= 32, hook && hook.url);
-prova('e arriva ROBOT ACCESO con i comandi', telegrammi.some(t => /ROBOT ACCESO/.test(t.text || '') && /\/chiudi/.test(t.text)));
+r = await chiedi('/api/robot', {});
+prova('senza giri (cron spento) l\'app vede il comando in attesa: e\' cosi\' che si scopre il cron mancante', r.stato === 200 && r.d.comando && r.d.comando.azione === 'avvia' &&
+      !r.d.robot && r.d.ora > 0, JSON.stringify({ comando: r.d.comando, robot: r.d.robot }));
+prova('ROBOT ACCESO non parte dall\'app: lo manda il primo giro', !telegrammi.some(t => /ROBOT ACCESO/.test(t.text || '')));
 
 telegrammi.length = 0;
 await giroRobot(ciclo(10), nAz);
 let st = robotKV();
 const ordini = broker.ordini.slice();
+prova('il primo giro applica il comando: acceso, punto di partenza 10000, ROBOT ACCESO su Telegram', st && st.acceso && st.capitaleIniziale === 10000 && st.perditaMax === 50 &&
+      telegrammi.some(t => /ROBOT ACCESO/.test(t.text || '') && /\/chiudi/.test(t.text) && /giro completo/.test(t.text)), JSON.stringify(st && { acceso: st.acceso, cap: st.capitaleIniziale }));
+r = await chiedi('/api/robot', {});
+prova('applicato il comando, l\'app non lo vede piu\' in attesa', !r.d.comando && r.d.robot.acceso);
 prova('in un giro della lista il robot apre da solo', ordini.length >= 1 && st.aperte.length === broker.pos.length,
       ordini.map(o => o.epic + ' ' + o.direction + ' ' + o.size).join(', '));
 prova('ogni ordine nasce con stop loss e take profit su Capital.com, dalla parte giusta', ordini.length > 0 && ordini.every(o => {
@@ -324,11 +345,19 @@ prova('ogni ordine nasce con stop loss e take profit su Capital.com, dalla parte
 prova('mai due posizioni sullo stesso mercato, mai su NVDA dove eri gia\' dentro', new Set(ordini.map(o => o.epic)).size === ordini.length && !ordini.some(o => o.epic === 'NVDA'));
 const rischio = st.aperte.reduce((t, a) => t + Math.abs(a.entrata - a.stopIniziale) * a.dim * a.cambio, 0);
 prova('il rischio di tutte le posizioni insieme sta sotto il tetto di 50', rischio <= 50 + 1e-6, rischio.toFixed(2));
+prova('nessun colpo rischia piu\' di meta\' del tetto', st.aperte.every(a => Math.abs(a.entrata - a.stopIniziale) * a.dim * a.cambio <= 25 + 1e-6));
 const margine = broker.pos.reduce((t, x) => t + x.position.size * x.position.level * 0.8 / 5, 0);
 prova('e il margine sotto quello disponibile sul conto (59)', margine <= 59 + 1e-6, margine.toFixed(2));
 prova('ogni apertura arriva su Telegram', telegrammi.filter(t => /^<b>APERTA/.test(t.text || '')).length === ordini.length);
 prova('nel diario ci sono le aperture', st.diario.filter(d => d.tipo === 'aperta').length === ordini.length);
+/* le occhiate vanno in KV al massimo ogni cinque minuti: un giro dopo, ci sono tutte */
+await giroRobot(ciclo(10) + (nAz + 6) * 60000, 1);
+st = robotKV();
+prova('il battito dice quando ha girato l\'ultima volta', st.battito && st.battito.quando >= ciclo(10) && st.battito.disponibile != null, JSON.stringify(st.battito));
 
+prova('per ogni mercato della lista si legge l\'ultima occhiata e il perche\' (la risposta a "perche\' non apre?")', robotKV() &&
+      AZ.every(ep => st.visti[ep] && typeof st.visti[ep].motivo === 'string' && st.visti[ep].motivo.length > 3),
+      AZ.map(ep => ep + ': ' + (st.visti[ep] ? st.visti[ep].motivo : '—')).join(' | '));
 await giroRobot(ciclo(11), nAz);
 prova('il giro dopo non raddoppia niente', broker.ordini.length === ordini.length, broker.ordini.length - ordini.length);
 
@@ -353,14 +382,16 @@ delete broker.prezzi[a0.epic];
 telegrammi.length = 0;
 await giroRobot(ciclo(13), 1);
 st = robotKV();
-prova('il robot si accorge della chiusura fatta da Capital.com', !st.aperte.some(a => a.id === a0.id) && telegrammi.some(t => /l'ha chiusa Capital\.com/i.test(t.text || '')));
+prova('il robot si accorge della chiusura fatta da Capital.com, e dice se e\' stop o take profit', !st.aperte.some(a => a.id === a0.id) &&
+      telegrammi.some(t => /l'ha chiusa Capital\.com: (stop|take profit) a /i.test(t.text || '')) && st.colpi.n === 1,
+      telegrammi.map(t => t.text.split('\n').slice(0, 2).join(' | ')).join(' || '));
 
 /* il tetto: perdita dall'avvio oltre 50 */
 contoFinto.pnl = -55;
 telegrammi.length = 0;
 await giroRobot(ciclo(14), 1);
 st = robotKV();
-prova('al tetto di perdita il robot si ferma e chiude tutto', !st.acceso && st.motivo === 'tetto' && st.aperte.length === 0 && broker.pos.length === 0,
+prova('al tetto di perdita il robot si ferma e chiude tutto', !st.acceso && st.motivo === 'tetto' && st.aperte.length === 0 && broker.pos.length === 0 && !st.chiudiTutto,
       JSON.stringify({ acceso: st.acceso, aperte: st.aperte.length, broker: broker.pos.length }));
 prova('e lo scrive su Telegram', telegrammi.some(t => /ROBOT FERMATO · tetto/.test(t.text || '')));
 const ordiniDopoTetto = broker.ordini.length;
@@ -374,18 +405,138 @@ await giroRobot(ciclo(100), nAz);
 const aperteRiavvio = broker.pos.length;
 r = await chiedi('/api/robot', {});
 prova('lo stato del robot per l\'app: acceso, conto, posizioni con prezzo', r.stato === 200 && r.d.robot.acceso && r.d.conto && r.d.robot.aperte.every(a => a.presente) &&
-      r.d.risultato === 0, JSON.stringify({ aperte: r.d.robot.aperte.length, risultato: r.d.risultato }));
+      r.d.risultato === 0 && r.d.robot.colpi.n === 0, JSON.stringify({ aperte: r.d.robot.aperte.length, risultato: r.d.risultato }));
 r = await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
-prova('"ferma e chiudi" dall\'app chiude tutte le sue posizioni', aperteRiavvio > 0 && r.stato === 200 && !r.d.robot.acceso && broker.pos.length === 0,
-      aperteRiavvio + ' aperte, ' + broker.pos.length + ' rimaste');
+prova('"ferma e chiudi" dall\'app chiude subito tutte le sue posizioni', aperteRiavvio > 0 && r.stato === 200 && broker.pos.length === 0 &&
+      r.d.esiti.length === aperteRiavvio && r.d.esiti.every(e => e.ok), aperteRiavvio + ' aperte, ' + broker.pos.length + ' rimaste');
+r = await chiedi('/api/robot', {});
+prova('e fino al giro dopo l\'app vede il Ferma in arrivo', r.d.comando && r.d.comando.azione === 'ferma' && r.d.comando.chiudi);
+await giroRobot(ciclo(101), 2);
+st = robotKV();
+prova('il giro dopo applica il Ferma: spento, niente da chiudere, nessun ordine nuovo', !st.acceso && st.aperte.length === 0 && !st.chiudiTutto &&
+      broker.pos.length === 0, JSON.stringify({ acceso: st.acceso, aperte: st.aperte.length, chiudi: st.chiudiTutto }));
 
-/* i comandi da Telegram */
-/* le chiusure fatte dall'app segnano l'ora vera, e il robot per 20 ore non
-   rientra sugli stessi mercati: qui il tempo e' simulato, quindi la pausa
-   si azzera a mano. Il giro e' di venerdi' pomeriggio: Wall Street aperta. */
+/* LA CORSA. Un Ferma che arriva mentre un giro sta lavorando: prima il giro
+   riscriveva lo stato con "acceso" e il Ferma si perdeva. */
 { const q = robotKV(); q.chiuse = {}; kvm.set('robot', JSON.stringify(q)); }
 r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { budget: 100, perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: AZ } });
-await giroRobot(ciclo(200), nAz);
+await giroRobot(ciclo(200), 1);
+prova('(riacceso)', robotKV().acceso === true);
+/* il Ferma arriva DURANTE il giro: quando il giro legge lo stato del conto */
+let fermaMandato = false;
+const vecchioFetch = globalThis.fetch;
+globalThis.fetch = async (url, init = {}) => {
+  if (!fermaMandato && String(url).includes('/api/v1/accounts') && !String(url).includes('preferences')) {
+    fermaMandato = true;
+    globalThis.fetch = vecchioFetch;
+    await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: false } });
+  }
+  return vecchioFetch(url, init);
+};
+const ordiniCorsa = broker.ordini.length;
+await giroRobot(ciclo(200) + 60000, 1);
+globalThis.fetch = vecchioFetch;
+prova('un Ferma arrivato durante un giro non viene cancellato da quel giro', fermaMandato && comandoKV().azione === 'ferma');
+await giroRobot(ciclo(200) + 2 * 60000, nAz);
+prova('e il giro dopo lo applica: spento, e da li\' nessun ordine', robotKV().acceso === false && broker.ordini.length <= ordiniCorsa + 1,
+      'ordini durante la corsa: ' + (broker.ordini.length - ordiniCorsa));
+/* il Ferma arriva un attimo prima di un ordine: il robot lo vede e non ordina */
+contoFinto.pnl = 0;
+for (const x of broker.pos.slice()) await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
+await giroRobot(alle(12, 13, 45), 1);
+{ const q = robotKV(); q.chiuse = {}; kvm.set('robot', JSON.stringify(q)); }
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { budget: 100, perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: AZ } });
+await giroRobot(alle(12, 14), 1);
+let gancioScattato = false;
+ENV.MEMORIA.gancio = k => {
+  if (k !== 'robot:comando' || !new Error().stack.includes('entrataRobot')) return false;
+  kvm.set('robot:comando', JSON.stringify({ id: 'ferma-lampo', quando: Date.now(), azione: 'ferma', chiudi: false, chi: 'dall\'app' }));
+  gancioScattato = true;
+  return true;
+};
+const ordiniLampo = broker.ordini.length;
+await giroRobot(alle(12, 14, 1), nAz);
+ENV.MEMORIA.gancio = null;
+prova('un Ferma arrivato un attimo prima dell\'ordine: l\'ordine non parte', gancioScattato && broker.ordini.length === ordiniLampo && robotKV().acceso === false,
+      'ordini dopo il Ferma: ' + (broker.ordini.length - ordiniLampo));
+
+/* Un ordine partito, ma la conferma non arriva (la rete): lo stato era gia'
+   salvato prima dell'ordine, e il giro dopo adotta la posizione. */
+for (const x of broker.pos.slice()) await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
+await giroRobot(alle(12, 15), 1);
+{ const q = robotKV(); q.chiuse = {}; q.diario = []; kvm.set('robot', JSON.stringify(q)); }
+/* due posti: uno e' gia' preso dalla tua NVDA (contano tutte le posizioni del conto) */
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { budget: 100, perditaMax: 50, maxPosizioni: 2, stile: 'swing', lista: AZ } });
+broker.confermeRotte = true;
+const ordiniRotti = broker.ordini.length;
+for (let i = 0; i < nAz && broker.ordini.length === ordiniRotti; i++) { broker.ora = alle(12, 16) + i * 60000; await cron(broker.ora); }
+broker.confermeRotte = false;
+st = robotKV();
+prova('ordine senza conferma: resta "in attesa", salvato', broker.ordini.length === ordiniRotti + 1 && st.inAttesa.length === 1 && st.aperte.length === 0,
+      JSON.stringify({ ordini: broker.ordini.length - ordiniRotti, attesa: st.inAttesa.length }));
+await cron(broker.ora + 60000);
+st = robotKV();
+prova('e al giro dopo la posizione e\' sua (adottata), senza un secondo ordine', st.inAttesa.length === 0 && st.aperte.length === 1 && broker.ordini.length === ordiniRotti + 1 &&
+      st.diario.some(d => /confermato in ritardo/.test(d.testo)), JSON.stringify({ attesa: st.inAttesa.length, aperte: st.aperte.length }));
+
+/* Capital.com rifiuta: l'errore si scrive una volta, non a ogni giro */
+for (const x of broker.pos.slice()) await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
+await giroRobot(alle(13, 13, 45), 1);
+{ const q = robotKV(); q.chiuse = {}; q.diario = []; kvm.set('robot', JSON.stringify(q)); }
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { budget: 100, perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: AZ } });
+broker.rifiuta = true;
+await giroRobot(alle(13, 14), nAz);
+const rifiutatiPrimo = broker.rifiutati.length;
+await giroRobot(alle(13, 14, 20), nAz);
+broker.rifiuta = false;
+st = robotKV();
+const errori = st.diario.filter(d => d.tipo === 'errore');
+prova('ordine rifiutato: niente in attesa, e ogni errore si scrive una volta sola', rifiutatiPrimo > 0 && st.inAttesa.length === 0 &&
+      errori.length === rifiutatiPrimo && new Set(errori.map(d => d.testo)).size === errori.length && errori.every(d => /RISK_CHECK/.test(d.testo)),
+      rifiutatiPrimo + ' rifiutati, ' + errori.length + ' errori nel diario');
+prova('e quel mercato si lascia stare mezz\'ora: niente raffiche di ordini rifiutati', broker.rifiutati.length === rifiutatiPrimo,
+      (broker.rifiutati.length - rifiutatiPrimo) + ' rifiuti in piu\'');
+prova('e il motivo si vede anche fra i mercati guardati', Object.values(st.visti).some(v => /RISK_CHECK/.test(v.motivo)));
+
+/* le scritture in KV: con niente da fare, una ogni cinque minuti al massimo */
+await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
+await giroRobot(alle(13, 16), 1);
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { budget: 100, perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: ['DE40', 'IT40', 'UK100'] } });
+await giroRobot(alle(13, 17), 1);
+const scrittureQuiete = ENV.MEMORIA.scritture;
+await giroRobot(alle(13, 17, 1), 4);
+prova('mercati chiusi, niente da fare: in quattro minuti nessuna scrittura', ENV.MEMORIA.scritture === scrittureQuiete, ENV.MEMORIA.scritture - scrittureQuiete);
+await giroRobot(alle(13, 17, 6), 1);
+prova('dopo cinque minuti una, per il battito', ENV.MEMORIA.scritture === scrittureQuiete + 1 && robotKV().visti.DE40.motivo === 'mercato chiuso', ENV.MEMORIA.scritture - scrittureQuiete);
+await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: false } });
+await giroRobot(alle(13, 18), 1);
+
+/* il rapido: quarti d'ora, due mercati al minuto, obiettivo a 1.5R */
+contoFinto.pnl = 0;
+{ const q = robotKV(); q.chiuse = {}; q.diario = []; kvm.set('robot', JSON.stringify(q)); }
+telegrammi.length = 0;
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { perditaMax: 50, maxPosizioni: 10, stile: 'rapido', lista: AZ } });
+const ordiniRapido = broker.ordini.length;
+await giroRobot(alle(14, 14), 1);
+st = robotKV();
+prova('rapido: guarda due mercati al minuto', st.stile === 'rapido' && Object.keys(st.visti).length === 2 && telegrammi.some(t => /Rapido/.test(t.text || '') && /2 al minuto/.test(t.text)),
+      Object.keys(st.visti).join(','));
+await giroRobot(alle(14, 14, 1), Math.ceil(nAz / 2));
+st = robotKV();
+const nuovi = broker.ordini.slice(ordiniRapido);
+prova('rapido: apre, con il take profit a 1.5 volte la distanza dello stop', nuovi.length > 0 && nuovi.every(o => {
+  const a = st.aperte.find(x => x.epic === o.epic);
+  if (!a) return true;
+  return Math.abs(Math.abs(o.profitLevel - a.entrata) / Math.abs(a.entrata - o.stopLevel) - 1.5) < 0.05;
+}), nuovi.map(o => o.epic + ' stop ' + o.stopLevel + ' tp ' + o.profitLevel).join(', '));
+prova('rapido: tutti i mercati della lista guardati in mezzo giro', AZ.every(ep => st.visti[ep]));
+
+/* i comandi da Telegram */
+await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });
+await giroRobot(alle(15, 13, 45), 1);
+{ const q = robotKV(); q.chiuse = {}; kvm.set('robot', JSON.stringify(q)); }
+r = await chiedi('/api/robot/avvia', { metodo: 'POST', corpo: { perditaMax: 50, maxPosizioni: 10, stile: 'swing', lista: AZ } });
+await giroRobot(alle(15, 14), nAz);
 const percorsoTg = new URL(hook.url).pathname;
 async function tg(percorso, testo, chat, intestazione) {
   const h = { 'content-type': 'application/json' };
@@ -397,16 +548,21 @@ async function tg(percorso, testo, chat, intestazione) {
 prova('Telegram: percorso sbagliato = 404', await tg('/tg/indovino', '/stop') === 404);
 prova('Telegram: senza intestazione segreta = 403', await tg(percorsoTg, '/stop', 42, null) === 403);
 telegrammi.length = 0;
+const comandoPrima = comandoKV().id;
 await tg(percorsoTg, '/stop', 999);
-prova('Telegram: da un\'altra chat non obbedisce', robotKV().acceso === true && telegrammi.length === 0);
+prova('Telegram: da un\'altra chat non obbedisce', comandoKV().id === comandoPrima && telegrammi.length === 0);
 await tg(percorsoTg, '/stato');
-prova('Telegram: /stato risponde', telegrammi.some(t => /ROBOT ACCESO/.test(t.text || '')));
+prova('Telegram: /stato risponde, con l\'ultimo giro e l\'occhiata ai mercati', telegrammi.some(t => /ROBOT ACCESO/.test(t.text || '') && /Ultimo giro/.test(t.text) && /Ultima occhiata/.test(t.text)),
+      telegrammi.length + ' messaggi');
 const primaStop = broker.pos.length;
 await tg(percorsoTg, '/stop');
+await giroRobot(alle(15, 14, 30), 1);
 prova('Telegram: /stop ferma gli ingressi ma non chiude le posizioni', robotKV().acceso === false && broker.pos.length === primaStop && primaStop > 0,
       primaStop + ' posizioni');
 await tg(percorsoTg, '/chiudi');
-prova('Telegram: /chiudi chiude tutto', broker.pos.length === 0 && telegrammi.some(t => /POSIZIONI CHIUSE/.test(t.text || '')));
+prova('Telegram: /chiudi chiude subito tutto', broker.pos.length === 0 && telegrammi.some(t => /POSIZIONI CHIUSE/.test(t.text || '')));
+await giroRobot(alle(15, 14, 31), 1);
+prova('e il giro dopo trova tutto chiuso', robotKV().aperte.length === 0 && !robotKV().chiudiTutto);
 
 /* niente ordini scelti da fuori */
 r = await chiedi('/api/cap/positions', { metodo: 'POST', corpo: { epic: 'TSLA', direction: 'BUY', size: 100 } });

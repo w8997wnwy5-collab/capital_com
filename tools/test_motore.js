@@ -50,8 +50,8 @@ function normale(rnd) {
    sopra (succedeva: +0.04R a colpo su 9'000 colpi). Per il test dello zero
    servono candele fatte di molti passi piccoli, quasi continue; il backtest
    vero quello slittamento lo paga (REGOLE.slittamentoAtr). */
-function passeggiata(n, seme, vol, spreadRel, passi) {
-  passi = passi || 20;
+function passeggiata(n, seme, vol, spreadRel, passi, ms) {
+  passi = passi || 20; ms = ms || 86400000;
   var rnd = generatore(seme), p = 100, out = [], i, j;
   for (i = 0; i < n; i++) {
     var o = p, h = p, l = p;
@@ -59,7 +59,7 @@ function passeggiata(n, seme, vol, spreadRel, passi) {
       p *= Math.exp(vol / Math.sqrt(passi) * normale(rnd) - 0.5 * vol * vol / passi);
       if (p > h) h = p; if (p < l) l = p;
     }
-    out.push({ t: Date.UTC(2020, 0, 1) + i * 86400000, o: o, h: h, l: l, c: p, s: p * (spreadRel || 0), v: 1000 });
+    out.push({ t: Date.UTC(2020, 0, 1) + i * ms, o: o, h: h, l: l, c: p, s: p * (spreadRel || 0), v: 1000 });
   }
   return out;
 }
@@ -303,34 +303,47 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
 (function () {
   var ora = Date.UTC(2026, 9, 7, 16, 0);
   var an = { ok: true, dir: 1, grado: 'B', punti: 45 };
-  /* piano di base: R = 3 USD, cambio 0.8, leva 5, rischio previsto 7.5 CHF (B al 10% di 100) */
+  /* piano di base: R = 3 USD, cambio 0.8 (2.40 CHF per unita'), leva 5. Il
+     tetto e' 50: un B rischia 50 x 0.2 x 0.75 = 7.50 CHF, cioe' 3.1 unita'. */
   function piano(x) {
     return Object.assign({ R: 3, entrata: 100, stop: 97, tp2: 110.5, tipo: 'mercato', dim: 3, passo: 0.1, dimMin: 0.1,
                            cambio: 0.8, leva: 5, rischioSoldi: 7.5, motivoTempo: 'adesso' }, x || {});
   }
-  var stato = { aperte: 2, maxPosizioni: 10, residuo: 50, rischioAperto: 10, disponibile: 59 };
+  var stato = { aperte: 2, maxPosizioni: 10, tetto: 50, residuo: 50, rischioAperto: 10, disponibile: 59 };
   function e(x) { return M.robotEntrata(Object.assign({ an: an, piano: piano(), stato: stato, ora: ora, stile: 'swing' }, x || {})); }
 
+  prova('robot: il rischio a colpo si ragiona sul tetto (A 20%, B 15%, C 10%)',
+        M.rischioRobot(50, 'A') === 10 && M.rischioRobot(50, 'B') === 7.5 && M.rischioRobot(50, 'C') === 5);
   var ok = e();
-  prova('robot: segnale pronto, a mercato, spazio e margine: apre', ok.apri && ok.dim === 3 && ok.stop === 97 && ok.tp === 110.5, JSON.stringify(ok));
+  prova('robot: segnale pronto, a mercato, spazio e margine: apre', ok.apri && ok.dim === 3.1 && ok.stop === 97 && ok.tp === 110.5 && ok.rischio <= 7.5 + 1e-9, JSON.stringify(ok));
+  prova('robot: il budget del Colpo non conta (la taglia viene dal tetto)', e({ piano: piano({ dim: 0.2, rischioSoldi: 0.5 }) }).dim === 3.1);
   prova('robot: senza segnale non apre', !e({ an: { ok: true, dir: 1, grado: '', punti: 12 } }).apri);
   prova('robot: prezzo scappato (limite) non apre: aspetta', !e({ piano: piano({ tipo: 'limite' }) }).apri);
   prova('robot: gia\' dentro su quel mercato non apre', !e({ giaDentro: true }).apri);
   prova('robot: posti pieni non apre', !e({ stato: Object.assign({}, stato, { aperte: 10 }) }).apri);
   prova('robot: chiusa da poco nella stessa direzione non riapre', !e({ chiusaDiRecente: { dir: 1, quando: ora - 3600000 } }).apri &&
         e({ chiusaDiRecente: { dir: -1, quando: ora - 3600000 } }).apri && e({ chiusaDiRecente: { dir: 1, quando: ora - 30 * 3600000 } }).apri);
+  var orarioAperto = { aperto: true, chiude: ora + 3 * 3600000 };
+  prova('robot: in rapido rientra dopo un quarto d\'ora (entra, incassa, rientra)',
+        !e({ stile: 'rapido', orario: orarioAperto, chiusaDiRecente: { dir: 1, quando: ora - 10 * 60000 } }).apri &&
+        e({ stile: 'rapido', orario: orarioAperto, chiusaDiRecente: { dir: 1, quando: ora - 16 * 60000 } }).apri);
   var stretto = e({ stato: Object.assign({}, stato, { residuo: 12, rischioAperto: 10 }) });
-  prova('robot: il tetto di perdita taglia la taglia (restano 2 CHF: 0.8 azioni)', stretto.apri && stretto.dim === 0.8 && stretto.rischio <= 2 + 1e-9,
+  prova('robot: il tetto di perdita taglia la taglia (restano 2 CHF: 0.8 unita\')', stretto.apri && stretto.dim === 0.8 && stretto.rischio <= 2 + 1e-9,
         JSON.stringify(stretto));
   prova('robot: tetto esaurito non apre', !e({ stato: Object.assign({}, stato, { residuo: 50, rischioAperto: 50 }) }).apri);
   var poco = e({ stato: Object.assign({}, stato, { disponibile: 20 }) });
   prova('robot: il margine disponibile taglia la taglia', poco.apri && poco.margine <= 20 * 0.9 + 1e-9 && poco.dim === 1.1, JSON.stringify(poco));
-  prova('robot: senza margine non apre', !e({ stato: Object.assign({}, stato, { disponibile: 1 }) }).apri);
-  var minimo = e({ piano: piano({ dim: 0, dimMin: 1, rischioSoldi: 1.5 }) });
-  prova('robot: taglia minima accettata se rischia al massimo il doppio', minimo.apri && minimo.dim === 1, JSON.stringify(minimo));
-  prova('robot: taglia minima rifiutata se rischia di piu\'', !e({ piano: piano({ dim: 0, dimMin: 1, rischioSoldi: 1 }) }).apri);
+  prova('robot: senza margine non apre, e dice quanto serve', !e({ stato: Object.assign({}, stato, { disponibile: 1 }) }).apri &&
+        /servono/.test(e({ stato: Object.assign({}, stato, { disponibile: 1 }) }).motivo));
+  var piccolo = { aperte: 0, maxPosizioni: 10, tetto: 10, residuo: 10, rischioAperto: 0, disponibile: 59 };
+  var minimo = e({ piano: piano({ dimMin: 1, passo: 1 }), stato: piccolo });
+  prova('robot: taglia minima accettata se rischia fino a meta\' del tetto', minimo.apri && minimo.dim === 1 && Math.abs(minimo.rischio - 2.4) < 1e-9, JSON.stringify(minimo));
+  var troppo = e({ piano: piano({ dimMin: 1, passo: 1 }), stato: Object.assign({}, piccolo, { tetto: 4, residuo: 4 }) });
+  prova('robot: taglia minima rifiutata se rischia di piu\', e lo dice', !troppo.apri && /taglia minima/.test(troppo.motivo), troppo.motivo);
   prova('robot: intraday, a 30 minuti dalla chiusura non apre', !e({ stile: 'intraday', orario: { aperto: true, chiude: ora + 30 * 60000 } }).apri &&
-        e({ stile: 'intraday', orario: { aperto: true, chiude: ora + 3 * 3600000 } }).apri);
+        e({ stile: 'intraday', orario: orarioAperto }).apri);
+  prova('robot: il motivo del "no" si legge', /serve almeno 28/.test(e({ an: { ok: true, dir: 1, grado: '', punti: 12 } }).motivo) &&
+        /scappato/.test(e({ piano: piano({ tipo: 'limite' }) }).motivo));
 
   var pos = { dir: 1, stop: 97 };
   var c = function (x) { return Object.assign({ verdetto: 'tieni', frase: '', stopRegola: 97, faseStop: 'iniziale', R: 3, uscita: 101, barre: 2 }, x); };
@@ -353,6 +366,15 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
      (uscita - entrata) e R hanno lo stesso segno, colpo per colpo */
   var coerenti = tutti.every(function (k) { var m = (k.uscita - k.entrata) * k.dir; return k.r === 0 || m === 0 || (m > 0) === (k.r > 0); });
   prova('backtest del robot: ogni colpo ha un\'uscita sola', coerenti);
+  /* lo stesso per il rapido: quarti d'ora, regole sue, fuori a sera */
+  var rapidi = [];
+  for (var sr = 1; sr <= 120; sr++) rapidi = rapidi.concat(M.backtest(passeggiata(900, 5000 + sr, 0.004, 0, 400, 900000), { soglia: 28, senzaCosti: true, unaSola: true, stile: 'rapido' }).colpi);
+  var rq = M.riassumi(rapidi);
+  prova('backtest del rapido: passeggiata a caso compatibile con zero', Math.abs(rq.tStat) < 2.6 && rq.n > 500,
+        'colpi ' + rq.n + ', R medio ' + rq.rMedio.toFixed(4) + ', t ' + rq.tStat.toFixed(2));
+  var Rr = M.regoleDi('rapido');
+  prova('rapido: obiettivo corto, uscita in due ore', Rr.tp2 === 1.5 && Rr.stopAtr === 1.2 && Rr.slittamentoAtr === M.REGOLE.slittamentoAtr &&
+        rapidi.every(function (k) { return k.barre <= M.STILI.rapido.maxBarre; }) && M.regoleDi('swing') === M.regoleDi(M.STILI.swing) && M.regoleDi('swing').tp2 === 3.5);
   var conSlip = M.riassumi(M.backtest(passeggiata(900, 77, 0.02, 0.0005), { soglia: 28 }).colpi);
   var senzaSlip = M.riassumi(M.backtest(passeggiata(900, 77, 0.02, 0.0005), { soglia: 28, senzaCosti: true }).colpi);
   prova('lo slittamento sugli stop costa, non regala', conSlip.rMedio < senzaSlip.rMedio, conSlip.rMedio.toFixed(4) + ' < ' + senzaSlip.rMedio.toFixed(4));
@@ -388,6 +410,16 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
     if (p.dim >= 0 && isFinite(p.margine)) piani++;
   });
   prova('dati d\'esempio: tutti i mercati si analizzano', ok === E.UNIVERSO.length, ok + '/' + E.UNIVERSO.length);
+  /* il riferimento leggero del ponte da' lo stesso punteggio di quello intero dell'app */
+  var rifCs = M.candele(E.risposta('prices/US500', { resolution: 'MINUTE_15', max: 400 }, ora));
+  var pieno = M.indicatori(rifCs), leggero = M.riferimentoLeggero(rifCs), uguali = 0;
+  E.UNIVERSO.forEach(function (u) {
+    if (u[0] === 'US500') { uguali++; return; }
+    var cs = M.candele(E.risposta('prices/' + u[0], { resolution: 'MINUTE_15', max: 400 }, ora));
+    var a = M.analizza(cs, null, { rif: pieno }), b = M.analizza(cs, null, { rif: leggero });
+    if (a.ok && b.ok && a.punti === b.punti && JSON.stringify(a.parti) === JSON.stringify(b.parti)) uguali++;
+  });
+  prova('il riferimento leggero da\' lo stesso punteggio di quello intero', uguali === E.UNIVERSO.length, uguali + '/' + E.UNIVERSO.length);
   prova('dati d\'esempio: tutti i piani tornano numeri', piani === E.UNIVERSO.length);
   var orarie = M.candele(E.risposta('prices/NVDA', { resolution: 'HOUR', max: 300 }, ora));
   prova('dati d\'esempio: nessuna candela nel futuro', orarie[orarie.length - 1].t <= ora, new Date(orarie[orarie.length - 1].t).toISOString());

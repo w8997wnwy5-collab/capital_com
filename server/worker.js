@@ -265,6 +265,14 @@ function indicatori(cs, riferimento) {
   return ser;
 }
 
+/* Del riferimento il punteggio usa solo le chiusure e le medie a 20 e 50
+   (forza relativa e regime). Il ponte calcola solo quelle: costa un quarto
+   e il punteggio e' identico. */
+function riferimentoLeggero(cs) {
+  var k = colonne(cs);
+  return { k: k, ema20: ema(k.c, 20), ema50: ema(k.c, 50) };
+}
+
 /* Il riferimento (l'S&P 500, di solito) messo in fila con il titolo: per ogni
    candela del titolo, l'ultima candela del riferimento chiusa NON DOPO. */
 function allineaRiferimento(ser, rif) {
@@ -398,11 +406,18 @@ function punteggio(ser, t, extra) {
    candele e una di 400 possono dare punteggi diversi di qualche punto.
    Quattrocento bastano per la media a 200 e costano al ponte un terzo del
    calcolo: su Cloudflare gratis ogni giro ha dieci millisecondi. */
+/* Il RAPIDO e' il mordi e fuggi: legge i quarti d'ora, cerca il momento sui
+   cinque minuti, incassa tutto a +1.5R e non tiene niente piu' di due ore.
+   Ha regole sue (regole: qui sotto, il resto lo prende da REGOLE): stop piu'
+   vicino, pareggio presto, un solo obiettivo corto. Entra, guadagna, esce. */
 var STILI = {
   swing:    { nome: 'Swing', segnale: 'DAY', tempo: 'HOUR', candele: 1000, candeleVive: 400, candeleTempo: 300,
               barMs: 86400000, maxBarre: 20, orizzonte: 5, unita: 'giorni' },
   intraday: { nome: 'Intraday', segnale: 'HOUR', tempo: 'MINUTE_15', candele: 1000, candeleVive: 400, candeleTempo: 300,
-              barMs: 3600000, maxBarre: 7, orizzonte: 6, unita: 'ore', chiudiASera: true }
+              barMs: 3600000, maxBarre: 7, orizzonte: 6, unita: 'ore', chiudiASera: true },
+  rapido:   { nome: 'Rapido', segnale: 'MINUTE_15', tempo: 'MINUTE_5', candele: 1000, candeleVive: 400, candeleTempo: 300,
+              barMs: 900000, maxBarre: 8, orizzonte: 8, unita: 'quarti d\'ora', chiudiASera: true,
+              regole: { stopAtr: 1.2, tp1: 0.8, tp2: 1.5, trailAtr: 1.0, pareggioDa: 0.6 } }
 };
 
 /* Le regole d'uscita. Una sola tabella, usata dal piano, dal consiglio e dal
@@ -424,6 +439,24 @@ var REGOLE = {
      d'apertura escono gia' all'apertura, peggio). */
   slittamentoAtr: 0.05
 };
+
+/* Le regole di uno stile: le sue dove le ha, le altre da REGOLE. Si
+   calcolano una volta qui, cosi' piano, consiglio e backtest leggono la
+   stessa tabella. */
+var REGOLE_STILE = {};
+(function () {
+  for (var nome in STILI) {
+    if (!STILI.hasOwnProperty(nome)) continue;
+    var proprie = STILI[nome].regole || {}, r = {};
+    for (var k in REGOLE) if (REGOLE.hasOwnProperty(k)) r[k] = proprie.hasOwnProperty(k) ? proprie[k] : REGOLE[k];
+    REGOLE_STILE[nome] = r;
+  }
+})();
+function regoleDi(stile) {
+  if (typeof stile === 'string') return REGOLE_STILE[stile] || REGOLE;
+  for (var nome in STILI) if (STILI[nome] === stile) return REGOLE_STILE[nome];
+  return REGOLE;
+}
 
 /* Medio-alto e' il predefinito: lo hai chiesto tu. Il rischio e' la quota
    del budget che si perde se lo stop scatta; la leva non c'entra. */
@@ -634,13 +667,14 @@ function tempismo(an, ct, prezzoVivo) {
      dir         per forzare una direzione (di solito quella del segnale) */
 function piano(inp) {
   var an = inp.an, prof = PROFILI[inp.profilo] || PROFILI.aggressivo, stile = STILI[inp.stile] || STILI.swing;
+  var RG = regoleDi(stile);
   var str = inp.strumento || {}, cambio = finito(inp.cambio) && inp.cambio > 0 ? inp.cambio : 1;
   var budget = Math.max(0, +inp.budget || 0);
   var dir = inp.dir || an.dir || 1;
   var grado = an.grado || '';
   var tm = inp.tempismo || an.tempismo || { tipo: 'mercato', livello: an.prezzo + dir * an.spread / 2 };
   var entrata = tm.livello;
-  var R = REGOLE.stopAtr * an.atr;
+  var R = RG.stopAtr * an.atr;
   var avvisi = [];
 
   /* la distanza minima dello stop la decide Capital.com */
@@ -649,7 +683,7 @@ function piano(inp) {
     avvisi.push('Capital.com vuole lo stop ad almeno ' + str.distMinStopPerc + '% dal prezzo: allargato.');
   }
   var stop = entrata - dir * R;
-  var tp1 = entrata + dir * REGOLE.tp1 * R, tp2 = entrata + dir * REGOLE.tp2 * R;
+  var tp1 = entrata + dir * RG.tp1 * R, tp2 = entrata + dir * RG.tp2 * R;
 
   var ammesso = grado && prof.gradi.indexOf(grado) >= 0 && dir === an.dir;
   var moltGrado = PESO_GRADO[grado] || 0.5;
@@ -684,8 +718,8 @@ function piano(inp) {
   var valore = dim * entrata * cambio;
   var margine = margineDi(dim);
   var perdita = dim * R * cambio;
-  var guadagnoTp1 = dim * REGOLE.tp1 * R * cambio;
-  var guadagnoPiano = dim * (0.5 * REGOLE.tp1 + 0.5 * REGOLE.tp2) * R * cambio;
+  var guadagnoTp1 = dim * RG.tp1 * R * cambio;
+  var guadagnoPiano = dim * (0.5 * RG.tp1 + 0.5 * RG.tp2) * R * cambio;
   var notte = inp.notte || NOTTE_PREDEFINITA;
   var costoNotte = valore * (dir > 0 ? notte.lungo : notte.corto);
 
@@ -759,7 +793,7 @@ var VERDETTI = {
 };
 
 function consiglio(inp) {
-  var pos = inp.pos, an = inp.an, stile = STILI[inp.stile] || STILI.swing;
+  var pos = inp.pos, an = inp.an, stile = STILI[inp.stile] || STILI.swing, RG = regoleDi(stile);
   var dir = pos.dir, entrata = pos.entrata, ora = inp.ora || Date.now();
   var bid = inp.prezzo && finito(inp.prezzo.bid) ? inp.prezzo.bid : (an ? an.prezzo : entrata);
   var ask = inp.prezzo && finito(inp.prezzo.ask) ? inp.prezzo.ask : bid;
@@ -771,8 +805,8 @@ function consiglio(inp) {
      su Capital.com, altrimenti dalla regola (1.5 ATR). */
   var R = pos.R > 0 ? pos.R
         : (finito(pos.stopIniziale) ? Math.abs(entrata - pos.stopIniziale)
-        : (finito(pos.stop) && (pos.stop - entrata) * dir < 0 ? Math.abs(entrata - pos.stop) : REGOLE.stopAtr * atrS));
-  if (!(R > 0)) R = REGOLE.stopAtr * atrS;
+        : (finito(pos.stop) && (pos.stop - entrata) * dir < 0 ? Math.abs(entrata - pos.stop) : RG.stopAtr * atrS));
+  if (!(R > 0)) R = RG.stopAtr * atrS;
   var stopIniziale = entrata - dir * R;
 
   /* il meglio visto dall'entrata: dalle candele, piu' il prezzo di adesso */
@@ -791,15 +825,15 @@ function consiglio(inp) {
   /* lo stop che si dovrebbe avere adesso: sale e non scende mai, perche'
      dipende solo dal massimo raggiunto, che non scende mai */
   var stopRegola = stopIniziale, faseStop = 'iniziale';
-  if (rMax >= REGOLE.pareggioDa) { stopRegola = entrata + dir * 0.05 * R; faseStop = 'pareggio'; }
-  if (rMax >= REGOLE.tp1) {
-    var insegue = meglio - dir * REGOLE.trailAtr * atrS;
+  if (rMax >= RG.pareggioDa) { stopRegola = entrata + dir * 0.05 * R; faseStop = 'pareggio'; }
+  if (rMax >= RG.tp1) {
+    var insegue = meglio - dir * RG.trailAtr * atrS;
     if ((insegue - stopRegola) * dir > 0) { stopRegola = insegue; faseStop = 'insegue'; }
   }
   var stopAttuale = finito(pos.stop) ? pos.stop : null;
   var stopEff = stopAttuale != null && (stopAttuale - stopRegola) * dir > 0 ? stopAttuale : stopRegola;
 
-  var tp1 = entrata + dir * REGOLE.tp1 * R, tp2 = entrata + dir * REGOLE.tp2 * R;
+  var tp1 = entrata + dir * RG.tp1 * R, tp2 = entrata + dir * RG.tp2 * R;
   var pnl = (uscita - entrata) * dir * pos.dim;
   var punti = an && an.ok ? an.punti : null;
   var conDir = punti != null ? punti * dir : null;
@@ -829,43 +863,43 @@ function consiglio(inp) {
     decidi('esci', 'Chiude fra ' + Math.max(1, Math.round((orario.chiude - ora) / 60000)) + ' minuti: in intraday non si dorme dentro.');
   }
   /* 5. secondo incasso */
-  if (rOra >= REGOLE.tp2) {
+  if (rOra >= RG.tp2) {
     decidi('incassa', 'Obiettivo pieno raggiunto: +' + fmtNum(rOra, 1) + 'R. Chiudi il resto, oppure lascia una coda con lo stop a ' +
       fmtPrezzo(stopRegola) + '.');
   }
   /* 6. primo incasso */
-  if (rMax >= REGOLE.tp1 && !pos.parziale) {
+  if (rMax >= RG.tp1 && !pos.parziale) {
     decidi('meta', 'Toccato il primo obiettivo (' + fmtPrezzo(tp1) + '). Chiudi meta\' e porta lo stop a ' + fmtPrezzo(stopRegola) +
       ': da qui in poi il colpo non puo\' piu\' perdere.');
   }
   /* 7. lo stop da spostare */
   var guadagnoStop = stopAttuale == null ? Infinity : (stopRegola - stopAttuale) * dir / R;
-  if (rMax >= REGOLE.pareggioDa && guadagnoStop >= 0.25) {
+  if (rMax >= RG.pareggioDa && guadagnoStop >= 0.25) {
     decidi('stop', 'Porta lo stop a ' + fmtPrezzo(stopRegola) +
       (faseStop === 'pareggio' ? ' (pareggio): il peggio che puo\' succedere adesso e\' uscire pari.'
-                               : ': insegue il prezzo a ' + REGOLE.trailAtr + ' ATR dal massimo.'));
+                               : ': insegue il prezzo a ' + RG.trailAtr + ' ATR dal massimo.'));
   }
   /* 8. rinforzare: solo PRIMA del primo incasso. Dopo, la posizione si
      alleggerisce; prendere meta' e ricomprarla nello stesso giro vuol dire
      pagare due volte lo spread per restare dove si era. */
-  if (rOra >= REGOLE.rinforzaDa && rMax < REGOLE.tp1 && !pos.parziale && conDir != null && conDir >= 55 && !pos.rinforzata) {
+  if (rOra >= RG.rinforzaDa && rMax < RG.tp1 && !pos.parziale && conDir != null && conDir >= 55 && !pos.rinforzata) {
     decidi('rinforza', 'Sei a +' + fmtNum(rOra, 1) + 'R e il segnale e\' ancora A (' + segno(punti) + '). Aggiungi meta\' della taglia (' +
       fmtNum(giuAlPasso(pos.dim / 2, pos.passo || 0.01), 2) + ') con lo stop di tutto a ' + fmtPrezzo(stopRegola) + '.');
   }
 
   /* l'attenzione: non cambia il verdetto se ce n'e' gia' uno, ma si scrive */
   var distStopR = (uscita - stopEff) * dir / R;
-  if (distStopR > 0 && distStopR < REGOLE.vicinoStop) motivi.push('A ' + fmtNum(distStopR, 2) + 'R dallo stop.');
+  if (distStopR > 0 && distStopR < RG.vicinoStop) motivi.push('A ' + fmtNum(distStopR, 2) + 'R dallo stop.');
   if (conDir != null && conDir < 15 && conDir > -SOGLIA_GIRO) motivi.push('La spinta si sta spegnendo: punteggio ' + segno(punti) + '.');
   var barre = Math.max(0, (ora - pos.aperta) / stile.barMs);
   if (barre > stile.maxBarre) motivi.push('Dentro da ' + Math.round(barre) + ' ' + stile.unita + ': oltre il tempo massimo del piano (' + stile.maxBarre + ').');
   var dataOra = new Date(ora);
-  if (!stile.chiudiASera && dataOra.getUTCDay() === 5 && dataOra.getUTCHours() >= 17 && rOra < REGOLE.pareggioDa) {
+  if (!stile.chiudiASera && dataOra.getUTCDay() === 5 && dataOra.getUTCHours() >= 17 && rOra < RG.pareggioDa) {
     motivi.push('Venerdi\' sera: il weekend puo\' aprire lunedi\' con un buco oltre lo stop.');
   }
   if (motivi.length) decidi('attento', motivi[0]);
   decidi('tieni', rOra >= 0
-    ? 'Tutto secondo il piano. Prossimo passo a ' + fmtPrezzo(rMax >= REGOLE.tp1 ? tp2 : tp1) + '.'
+    ? 'Tutto secondo il piano. Prossimo passo a ' + fmtPrezzo(rMax >= RG.tp1 ? tp2 : tp1) + '.'
     : 'Sotto, ma dentro il rischio previsto. Lo stop sta a ' + fmtPrezzo(stopEff) + '.');
 
   /* sempre: la situazione in chiaro */
@@ -885,11 +919,11 @@ function consiglio(inp) {
 /* Il rischio iniziale di una posizione presa senza piano e senza stop: la
    regola (1.5 ATR) con l'ATR dell'ultima candela CHIUSA prima dell'entrata.
    Quella del giorno stesso conterrebbe gia' il dopo. */
-function rischioIniziale(cs, ser, aperta) {
+function rischioIniziale(cs, ser, aperta, stile) {
   var d = barraMs(cs), t = cs.length - 1;
   while (t > 0 && cs[t].t + d > aperta) t--;
   var a = ser.atr[t];
-  return finito(a) && a > 0 ? REGOLE.stopAtr * a : null;
+  return finito(a) && a > 0 ? regoleDi(stile || 'swing').stopAtr * a : null;
 }
 
 /* ─────────────────────────── il robot ───────────────────────────
@@ -905,28 +939,36 @@ function rischioIniziale(cs, ser, aperta) {
    stop a pareggio, stop che insegue, uscita se il segnale si gira — lo fa il
    ponte, con le stesse regole del consiglio e del backtest (unaSola).
 
-   Il tetto: il robot non mette mai a rischio piu' di quanto resta della
-   perdita massima che hai scelto. Se scattassero tutti gli stop insieme
-   arriveresti al tetto, non oltre — salvo i buchi di prezzo, che nessuno
-   stop puo' fermare. */
+   La taglia si ragiona sul TETTO, la perdita massima che scegli tu, non sul
+   budget del Colpo: e' quella la cifra che hai deciso di poter perdere. Un
+   A rischia un quinto del tetto, un B 15%, un C un decimo. La taglia minima
+   di Capital.com si accetta anche se rischia di piu', fino a meta' del
+   tetto. E il robot non mette mai a rischio piu' di quanto resta del tetto:
+   se scattassero tutti gli stop insieme arriveresti li', non oltre — salvo
+   i buchi di prezzo, che nessuno stop puo' fermare. */
 
 var ROBOT = {
   profilo: 'estremo',
+  quotaColpo: 0.2,                /* il rischio di un A, in quota del tetto (B 3/4, C 1/2) */
+  colpoMax: 0.5,                  /* con la taglia minima un colpo puo' rischiare fino a meta' del tetto */
   margineUsabile: 0.9,            /* del margine disponibile sul conto: il resto e' cuscinetto */
-  minutiPrimaChiusura: 45,        /* in intraday non si entra a meno di 45 minuti dalla chiusura */
-  pausaDopoChiusura: { swing: 20 * 3600000, intraday: 3600000 },  /* stesso mercato, stessa direzione */
-  minimoFinoA: 2,                 /* la taglia minima si accetta se rischia al massimo il doppio del previsto */
+  minutiPrimaChiusura: 45,        /* chi chiude a sera non entra a meno di 45 minuti dalla chiusura */
+  /* stesso mercato, stessa direzione: quanto aspettare dopo una chiusura */
+  pausaDopoChiusura: { swing: 20 * 3600000, intraday: 3600000, rapido: 15 * 60000 },
   stopMinimo: 0.2                 /* lo stop si sposta solo se migliora di almeno 0.2R */
 };
+
+/* Quanto rischia il robot su un colpo di questo grado, con questo tetto. */
+function rischioRobot(tetto, grado) { return Math.max(0, +tetto || 0) * ROBOT.quotaColpo * (PESO_GRADO[grado] || 0.5); }
 
 function robotEntrata(inp) {
   var an = inp.an, p = inp.piano, st = inp.stato || {}, ora = inp.ora || Date.now();
   var stile = STILI[inp.stile] ? inp.stile : 'swing';
   var no = function (m) { return { apri: false, motivo: m }; };
   if (!an || !an.ok) return no((an && an.motivo) || 'nessuna analisi');
-  if (!pronto(an, ROBOT.profilo)) return no('nessun segnale (' + segno(an.punti) + ')');
+  if (!pronto(an, ROBOT.profilo)) return no('nessun segnale (' + segno(an.punti) + ', serve almeno ' + sogliaProfilo(ROBOT.profilo) + ')');
   if (!p || !(p.R > 0) || !(p.entrata > 0)) return no('piano non calcolabile');
-  if (p.tipo !== 'mercato') return no(p.tipo === 'limite' ? 'prezzo scappato: aspetta che torni' : 'aspetta la rottura');
+  if (p.tipo !== 'mercato') return no(p.tipo === 'limite' ? 'segnale ' + an.grado + ' ma prezzo scappato: aspetta che torni' : 'segnale ' + an.grado + ' a un passo dalla rottura: aspetta che rompa');
   if (inp.giaDentro) return no('gia\' dentro su questo mercato');
   var rec = inp.chiusaDiRecente;
   if (rec && rec.dir === an.dir && ora - rec.quando < ROBOT.pausaDopoChiusura[stile]) return no('chiusa da poco nella stessa direzione');
@@ -936,20 +978,21 @@ function robotEntrata(inp) {
     if (STILI[stile].chiudiASera && inp.orario.chiude && inp.orario.chiude - ora < ROBOT.minutiPrimaChiusura * 60000) return no('chiude fra poco');
   }
   var passo = p.passo > 0 ? p.passo : 0.01, dimMin = p.dimMin > 0 ? p.dimMin : 0;
-  var cambio = p.cambio > 0 ? p.cambio : 1;
+  var cambio = p.cambio > 0 ? p.cambio : 1, tetto = +st.tetto > 0 ? +st.tetto : 0;
   var rischioUnita = p.R * cambio, margineUnita = p.entrata * cambio / (p.leva > 0 ? p.leva : 1);
-  var dim = p.dim;
+  var voluto = rischioRobot(tetto, an.grado);
+  var dim = giuAlPasso(voluto / rischioUnita, passo);
   if (!(dim > 0) || dim < dimMin) {
-    /* sotto la taglia minima: la minima va bene solo se non rischia troppo */
-    if (dimMin > 0 && dimMin * rischioUnita <= ROBOT.minimoFinoA * p.rischioSoldi) dim = dimMin;
-    else return no('taglia minima troppo grossa per il budget');
+    /* sotto la taglia minima: la minima va bene finche' rischia al massimo meta' del tetto */
+    if (dimMin > 0 && dimMin * rischioUnita <= ROBOT.colpoMax * tetto + 1e-9) dim = dimMin;
+    else return no('taglia minima troppo grossa: rischierebbe ' + fmtNum(Math.max(dimMin, passo) * rischioUnita, 2) + ', oltre meta\' del tetto');
   }
   var spazio = (st.residuo || 0) - (st.rischioAperto || 0);
   if (dim * rischioUnita > spazio) dim = giuAlPasso(Math.max(0, spazio) / rischioUnita, passo);
   if (!(dim > 0) || dim < dimMin) return no('tetto di perdita: restano ' + fmtNum(Math.max(0, spazio), 2) + ' da rischiare');
   var usabile = (st.disponibile || 0) * ROBOT.margineUsabile;
   if (dim * margineUnita > usabile) dim = giuAlPasso(Math.max(0, usabile) / margineUnita, passo);
-  if (!(dim > 0) || dim < dimMin) return no('margine finito sul conto');
+  if (!(dim > 0) || dim < dimMin) return no('margine finito sul conto (servono ' + fmtNum(Math.max(dimMin, passo) * margineUnita, 2) + ', liberi ' + fmtNum(usabile, 2) + ')');
   return { apri: true, dim: dim, dir: an.dir, stop: p.stop, tp: p.tp2, R: p.R, entrata: p.entrata,
            rischio: dim * rischioUnita, margine: dim * margineUnita, motivo: p.motivoTempo || '' };
 }
@@ -993,7 +1036,7 @@ function barraMs(cs) {
    aver guadagnato quanto si rischiava. */
 function backtest(cs, opz) {
   opz = opz || {};
-  var stile = STILI[opz.stile] || STILI.swing;
+  var stile = STILI[opz.stile] || STILI.swing, RG = regoleDi(stile);
   var ser = opz.ser || indicatori(cs, opz.rif || null);
   var k = ser.k, n = k.n;
   var soglia = finito(opz.soglia) ? opz.soglia : 40;
@@ -1014,10 +1057,10 @@ function backtest(cs, opz) {
     var dir = p > 0 ? 1 : -1;
     var mezzoSp = senzaCosti ? 0 : k.s[t + 1] / 2;
     var entrata = k.o[t + 1] + dir * mezzoSp;
-    var R = REGOLE.stopAtr * ser.atr[t];
+    var R = RG.stopAtr * ser.atr[t];
     if (!(R > 0)) continue;
     aperto = { t: t + 1, dir: dir, entrata: entrata, R: R, stop: entrata - dir * R,
-               tp1: entrata + dir * REGOLE.tp1 * R, tp2: entrata + dir * REGOLE.tp2 * R,
+               tp1: entrata + dir * RG.tp1 * R, tp2: entrata + dir * RG.tp2 * R,
                meta: false, uscitaMeta: null, meglio: entrata, punti: p, grado: gradoDi(p), tp1Toccato: false };
     var j, esito = null, prezzoUscita = null, notti = 0;
     for (j = t + 1; j < n; j++) {
@@ -1031,7 +1074,7 @@ function backtest(cs, opz) {
       /* il buco: apre gia' oltre lo stop */
       if ((oE - aperto.stop) * dir <= 0) { esito = 'stop'; prezzoUscita = oE; break; }
       if ((contrario - aperto.stop) * dir <= 0) {
-        var slip = senzaCosti ? 0 : REGOLE.slittamentoAtr * (finito(ser.atr[j]) ? ser.atr[j] : 0);
+        var slip = senzaCosti ? 0 : RG.slittamentoAtr * (finito(ser.atr[j]) ? ser.atr[j] : 0);
         esito = 'stop';
         prezzoUscita = dir > 0 ? Math.max(aperto.stop - slip, lE) : Math.min(aperto.stop + slip, hE);
         break;
@@ -1046,9 +1089,9 @@ function backtest(cs, opz) {
       /* fine candela: il meglio visto, lo stop che insegue, il segnale, il tempo */
       if ((favorevole - aperto.meglio) * dir > 0) aperto.meglio = favorevole;
       var rMax = (aperto.meglio - entrata) * dir / R;
-      if (rMax >= REGOLE.pareggioDa && (entrata + dir * 0.05 * R - aperto.stop) * dir > 0) aperto.stop = entrata + dir * 0.05 * R;
-      if (rMax >= REGOLE.tp1) {
-        var ins = aperto.meglio - dir * REGOLE.trailAtr * ser.atr[j];
+      if (rMax >= RG.pareggioDa && (entrata + dir * 0.05 * R - aperto.stop) * dir > 0) aperto.stop = entrata + dir * 0.05 * R;
+      if (rMax >= RG.tp1) {
+        var ins = aperto.meglio - dir * RG.trailAtr * ser.atr[j];
         if ((ins - aperto.stop) * dir > 0) aperto.stop = ins;
       }
       if (finito(punti[j]) && punti[j] * dir <= -SOGLIA_GIRO && j + 1 < n) {
@@ -1204,7 +1247,8 @@ var API = {
   parti: parti, punteggio: punteggio, gradoDi: gradoDi, letturaFolla: letturaFolla,
   analizza: analizza, tempismo: tempismo, piano: piano, ripartisci: ripartisci, consiglio: consiglio,
   pronto: pronto, sogliaProfilo: sogliaProfilo, strumentoDa: strumentoDa, notteDa: notteDa,
-  robotEntrata: robotEntrata, robotUscita: robotUscita, ROBOT: ROBOT,
+  robotEntrata: robotEntrata, robotUscita: robotUscita, rischioRobot: rischioRobot, ROBOT: ROBOT,
+  regoleDi: regoleDi, riferimentoLeggero: riferimentoLeggero,
   backtest: backtest, riassumi: riassumi, calibra: calibra, portafoglio: portafoglio,
   derive: derive, calibraDerive: calibraDerive, previsione: previsione,
   orari: orari, barraMs: barraMs, giuAlPasso: giuAlPasso, rischioIniziale: rischioIniziale,
@@ -1257,14 +1301,16 @@ const Motore = globalThis.Motore;
      POST /api/segui               come sorvegliarne una (stile, rischio, ...)
      DELETE /api/segui/<id>        smetti di sorvegliarla
      POST /api/telegram/prova      un messaggio di prova
-     GET  /api/robot               il robot: acceso?, conto, posizioni, diario
-     POST /api/robot/avvia         accendilo (budget, tetto di perdita, posti)
+     GET  /api/robot               il robot: acceso?, comando in attesa, conto,
+                                   posizioni, diario, cosa ha guardato, ultimo giro
+     POST /api/robot/avvia         accendilo (stile, tetto di perdita, posti): lo
+                                   applica il giro del cron, entro un minuto
      POST /api/robot/ferma         spegnilo; {chiudi: true} chiude anche tutto
    Senza codice, ma con un segreto nel percorso e uno nell'intestazione:
      POST /tg/<segreto>            i comandi da Telegram: /stato /stop /chiudi
    ══════════════════════════════════════════════════════════════════════════ */
 
-const VERSIONE = '2.0';
+const VERSIONE = '2.1';
 const SERVER_REALE = 'https://api-capital.backend-capital.com';
 const SERVER_DEMO = 'https://demo-api-capital.backend-capital.com';
 const ORIGINI_PREDEFINITE = 'https://w8997wnwy5-collab.github.io';
@@ -1606,12 +1652,13 @@ async function candeleDi(env, epic, risoluzione, quante) {
   if (!candeleGia.has(r)) candeleGia.set(r, Motore.candele(r));
   return candeleGia.get(r);
 }
-/* il riferimento (l'S&P 500) con i suoi indicatori, una volta per giro */
+/* il riferimento (l'S&P 500), una volta per giro: solo le medie che il
+   punteggio usa (riferimentoLeggero), che costano poco e non si contano */
 async function riferimentoDi(env, ctx, rifEpic, S) {
   const chiave = rifEpic + '|' + S.segnale;
   if (!ctx.rif[chiave]) {
     const cs = await candeleDi(env, rifEpic, S.segnale, S.candeleVive);
-    if (!indicatoriGia.has(cs)) { indicatoriGia.set(cs, Motore.indicatori(cs)); ctx.freddi = (ctx.freddi || 0) + 1; }
+    if (!indicatoriGia.has(cs)) indicatoriGia.set(cs, Motore.riferimentoLeggero(cs));
     ctx.rif[chiave] = indicatoriGia.get(cs);
   }
   return ctx.rif[chiave];
@@ -1703,10 +1750,13 @@ async function posizioniAperte(env) {
   return lista;
 }
 
-async function sorvegliaUscite(env, ctx, lista, imp, rifEpic, ora) {
+async function sorvegliaUscite(env, ctx, lista, imp, rifEpic, ora, limite = Infinity) {
   const aperte = lista.filter(p => p.stato === 'TRADEABLE');
   const mandati = [];
-  for (const pos of aperte) {
+  /* a rotazione: se il calcolo del giro e' finito, le altre al giro dopo */
+  const giro = Math.floor(ora / 60000);
+  const ordine = aperte.map((_, i) => aperte[(i + giro) % aperte.length]);
+  for (const pos of ordine) {
     try {
       let seg = await leggiKV(env, 'segui:' + pos.id);
       if (!seg) {
@@ -1716,9 +1766,10 @@ async function sorvegliaUscite(env, ctx, lista, imp, rifEpic, ora) {
         await scriviKV(env, 'segui:' + pos.id, seg);
       }
       const S = Motore.STILI[seg.stile] || Motore.STILI.swing;
+      if ((ctx.freddi || 0) >= limite && await sarebbeFreddo(env, ctx, pos.epic, S, rifEpic)) continue;
       if (!seg.R && seg.stopIniziale == null) {
         const cs = await candeleDi(env, pos.epic, S.segnale, S.candeleVive);
-        const R = Motore.rischioIniziale(cs, Motore.indicatori(cs), pos.aperta);
+        const R = Motore.rischioIniziale(cs, Motore.indicatori(cs), pos.aperta, seg.stile);
         if (R) { seg.R = R; await scriviKV(env, 'segui:' + pos.id, seg); }
       }
       const c = await consiglioPer(env, ctx, pos, seg, rifEpic, ora);
@@ -1841,36 +1892,63 @@ async function sorvegliaIngressi(env, ctx, lista, imp, rifEpic, ora) {
 /* ─────────────────────────── il robot ───────────────────────────
 
    Lo accendi dall'app, lo fermi dall'app o da Telegram. Gira nel cron di
-   ogni minuto. Lo stato sta in KV sotto 'robot', una chiave sola, letta
-   all'inizio del giro e scritta alla fine solo se qualcosa e' cambiato:
+   ogni minuto. In KV ci sono due chiavi, e ognuna ha un solo padrone:
 
+     robot:comando   l'ultimo ordine tuo: avvia (con le impostazioni) o
+                     ferma (e se chiudere tutto). La scrivono SOLO l'app e
+                     Telegram.
+     robot           lo stato del robot. Lo scrive SOLO il giro del cron.
+
+   Cosi' un "Ferma" non si puo' perdere: prima c'era una chiave sola, e un
+   giro partito un attimo prima del tuo Ferma la riscriveva con "acceso".
+   Adesso il giro legge il comando, lo applica una volta (si ricorda quale
+   ha visto: comandoVisto) e lo ricontrolla prima di ogni ordine.
+
+   Lo stato:
      acceso, avviato, fermato, motivo
      capitaleIniziale   il patrimonio (saldo + risultato aperto) all'avvio
      perditaMax         il tetto: arrivato li' si ferma e chiude tutto
-     maxPosizioni, budget, stile, lista, riferimento, valuta
+     maxPosizioni, stile, lista, riferimento, valuta
      aperte             le posizioni aperte dal robot: le altre non le tocca
      inAttesa           ordini mandati di cui non si e' vista la conferma
      chiuse             l'ultima chiusura per mercato, per non rientrare subito
+     chiudiTutto        c'e' da chiudere tutto (tetto, "ferma e chiudi"): si
+                        riprova a ogni giro finche' non resta niente
      diario             le ultime 40 cose fatte
+     visti              per ogni mercato l'ultima occhiata: punteggio e perche'
+                        non e' entrato. E' la risposta a "perche' non apre?"
+     battito            l'ultimo giro: se e' vecchio, il cron non gira
+
+   Le scritture in KV sono contate (mille al giorno gratis): si scrive quando
+   cambia qualcosa che conta, e comunque ogni cinque minuti per il battito e
+   i visti. Mai a ogni giro.
 
    L'ordine di un giro:
+     0. il comando, se ce n'e' uno nuovo;
      1. il conto: se la perdita dall'avvio ha raggiunto il tetto, si ferma e
-        chiude tutte le sue posizioni;
+        chiude tutto; se c'e' da chiudere tutto, chiude e basta;
      2. le sue posizioni che non ci sono piu' (stop o take profit scattati su
         Capital.com) escono dalla lista;
      3. per ognuna delle sue posizioni: chiudere, spostare lo stop, o niente.
         Anche da fermo: "Ferma" vuol dire che non apre piu' niente, non che
         abbandona quello che ha aperto;
-     4. se e' acceso: un mercato della lista, a rotazione, e se e' pronto per
-        il profilo Estremo si apre.
+     4. se e' acceso: i mercati della lista, a rotazione, e se uno e' pronto
+        per il profilo Estremo si apre.
 
-   Il calcolo e' la risorsa scarsa (10 ms a giro sul piano gratuito): gli
-   indicatori di un mercato si tengono finche' le sue candele sono le
-   stesse, e in un giro se ne ricalcolano al massimo ROBOT_CALCOLI. Le
-   posizioni saltate si guardano al giro dopo; intanto stop e take profit
-   sono gia' su Capital.com. */
+   Il calcolo e' la risorsa scarsa (10 ms a giro sul piano gratuito): in un
+   giro si calcolano da capo al massimo ROBOT_CALCOLI mercati, prima le
+   posizioni e poi gli ingressi. Quello che resta si guarda al giro dopo;
+   intanto stop e take profit sono gia' su Capital.com. */
 
-const ROBOT_BASE = { acceso: false, aperte: [], inAttesa: [], chiuse: {}, diario: [] };
+/* sempre una copia nuova: un oggetto condiviso fra i giri si porterebbe
+   dietro le posizioni di un altro */
+function robotBase() { return { acceso: false, aperte: [], inAttesa: [], chiuse: {}, rifiuti: {}, diario: [], visti: {}, errori: {}, colpi: { n: 0, vinti: 0 } }; }
+/* dopo un ordine rifiutato, quel mercato si lascia stare mezz'ora: se manca
+   il margine o la taglia non va, riprovare ogni giro non cambia niente */
+const PAUSA_RIFIUTO = 30 * 60000;
+const BATTITO_MS = 5 * 60000;
+/* quanti mercati guarda a ogni giro, se non lo dici tu (ROBOT_MERCATI_PER_GIRO) */
+const MERCATI_PER_GIRO = { swing: 1, intraday: 1, rapido: 2 };
 
 function contoDa(a) {
   const c = (a.accounts || []).find(x => x.preferred) || (a.accounts || [])[0];
@@ -1901,60 +1979,164 @@ function soldi(x, valuta) { return (x >= 0 ? '+' : '−') + Motore.fmtNum(Math.a
 function piede(robot, conto) {
   if (!conto || robot.capitaleIniziale == null) return '';
   return '\nDall\'avvio: ' + soldi(conto.patrimonio - robot.capitaleIniziale, conto.valuta) + ' · tetto ' + Motore.fmtNum(robot.perditaMax, 0) + ' ' + conto.valuta +
-    ' · posizioni ' + (robot.aperte || []).length + '/' + robot.maxPosizioni;
+    ' · posizioni ' + (robot.aperte || []).length + '/' + robot.maxPosizioni +
+    (robot.colpi && robot.colpi.n ? ' · colpi ' + robot.colpi.vinti + ' vinti su ' + robot.colpi.n : '');
+}
+function stileDi(robot) { return Motore.STILI[robot.stile] ? robot.stile : 'swing'; }
+
+/* tutto quello che conta per decidere se scrivere: non il battito e i
+   visti, che cambiano a ogni giro */
+function sostanza(robot) {
+  const { battito, visti, scritto, ...resto } = robot;
+  return JSON.stringify(resto);
+}
+function idComando(ora) { return ora + '-' + Math.random().toString(36).slice(2, 8); }
+
+/* un ordine partito senza conferma (la rete, un timeout) e la posizione
+   che e' comparsa su Capital.com: stesso mercato, verso, taglia, minuti */
+function trovaOrdine(robot, lista, w) {
+  return lista.find(p => p.epic === w.epic && p.dir === w.dir && Math.abs(p.dim - w.dim) < 1e-9 &&
+    !robot.aperte.some(a => a.id === p.id) && Math.abs(p.aperta - w.quando) < 10 * 60000) || null;
 }
 
-async function chiudiTutto(env, robot, ora, motivo) {
-  const esiti = [];
-  for (const a of (robot.aperte || []).slice()) {
+/* una posizione del robot che si e' chiusa: fuori dalla lista, pausa sul
+   mercato, e il conto dei colpi */
+function togli(robot, a, ora, profitto) {
+  robot.aperte = robot.aperte.filter(x => x.id !== a.id);
+  robot.chiuse[a.epic] = { dir: a.dir, quando: ora };
+  robot.colpi = robot.colpi || { n: 0, vinti: 0 };
+  robot.colpi.n++;
+  if (profitto > 0) robot.colpi.vinti++;
+}
+
+async function chiudiTutto(env, robot, lista, ora, motivo) {
+  const esiti = [], presenti = new Set(lista.map(p => p.id));
+  /* gli ordini senza conferma: se la posizione c'e', si chiude anche quella;
+     se non c'e' ancora, si aspetta (al massimo un quarto d'ora) */
+  for (const w of robot.inAttesa.slice()) {
+    const t = trovaOrdine(robot, lista, w);
+    if (t) robot.aperte.push({ ...w, id: t.id, entrata: t.entrata, dim: t.dim, aperta: t.aperta });
+    if (t || ora - w.quando > 15 * 60000) robot.inAttesa = robot.inAttesa.filter(x => x !== w);
+  }
+  for (const a of robot.aperte.slice()) {
     try {
-      const r = await chiudiPosizione(env, a.id);
-      robot.aperte = robot.aperte.filter(x => x.id !== a.id);
-      robot.chiuse[a.epic] = { dir: a.dir, quando: ora };
+      const r = presenti.has(a.id) ? await chiudiPosizione(env, a.id) : { ok: true, giaChiusa: true };
+      togli(robot, a, ora, r.profitto);
       annota(robot, ora, 'chiusa', nomePos(a) + ': chiusa (' + motivo + ')' + (r.profitto != null ? ', ' + soldi(r.profitto, r.valuta) : '') + '.');
-      esiti.push({ id: a.id, ok: true, profitto: r.profitto, valuta: r.valuta });
+      esiti.push({ id: a.id, ok: true, profitto: r.profitto, valuta: r.valuta, giaChiusa: !!r.giaChiusa });
     } catch (e) {
-      annota(robot, ora, 'errore', nomePos(a) + ': non riesco a chiuderla (' + e.message + ').');
+      annota(robot, ora, 'errore', nomePos(a) + ': non riesco a chiuderla (' + e.message + '). Riprovo al prossimo giro.');
       esiti.push({ id: a.id, ok: false, errore: e.message });
     }
   }
   return esiti;
 }
 
-async function giroRobot(env, ctx, robot, lista, rifEpic, ora) {
+/* il comando dall'app o da Telegram, una volta sola */
+function applicaComando(robot, comando, ora, nota) {
+  if (!comando || comando.id === robot.comandoVisto) return null;
+  robot.comandoVisto = comando.id;
+  const M = Motore;
+  if (comando.azione === 'avvia') {
+    const imp = comando.impostazioni || {};
+    if (comando.chiudiPrima && ((robot.aperte || []).length || (robot.inAttesa || []).length)) robot.chiudiTutto = true;
+    Object.assign(robot, {
+      acceso: true, avviato: comando.quando, fermato: null, motivo: '', errori: {}, colpi: { n: 0, vinti: 0 },
+      capitaleIniziale: comando.capitaleIniziale, valuta: comando.valuta,
+      perditaMax: imp.perditaMax, maxPosizioni: imp.maxPosizioni, stile: imp.stile, lista: imp.lista, riferimento: imp.riferimento,
+      visti: {},
+    });
+    nota('acceso', 'Acceso. Tetto di perdita ' + M.fmtNum(robot.perditaMax, 2) + ' ' + (robot.valuta || '') + ', fino a ' + robot.maxPosizioni +
+      ' posizioni, ' + robot.lista.length + ' mercati, ' + M.STILI[stileDi(robot)].nome + '.');
+    return 'avvia';
+  }
+  if (comando.azione === 'ferma') {
+    const eraAcceso = robot.acceso;
+    robot.acceso = false; robot.fermato = comando.quando; robot.motivo = comando.chi || '';
+    if (comando.chiudi) robot.chiudiTutto = true;
+    if (eraAcceso || comando.chiudi) {
+      nota('fermo', 'Fermato ' + (comando.chi || '') + (comando.chiudi ? ', con chiusura di tutte le posizioni.' : '. Non apro piu\' niente; le posizioni aperte le porto a fine con le loro regole.'));
+    }
+    return 'ferma';
+  }
+  return null;
+}
+
+/* Come e' finita una posizione che ha chiuso Capital.com da sola: dal prezzo
+   di adesso si capisce se ha preso il take profit o lo stop. E' una stima:
+   il numero vero e' nello storico di Capital.com. */
+async function comeEFinita(env, a) {
+  let px = null;
+  try {
+    const s = (await leggi(env, 'markets/' + a.epic, new URLSearchParams())).snapshot || {};
+    if (s.bid > 0 && s.offer > 0) px = (s.bid + s.offer) / 2;
+  } catch (e) { px = null; }
+  const stop = a.stop != null ? a.stop : a.stopIniziale;
+  if (px == null || a.tp == null || stop == null) return { testo: 'e\' scattato lo stop o il take profit', profitto: null };
+  const presoTp = Math.abs(px - a.tp) < Math.abs(px - stop);
+  const livello = presoTp ? a.tp : stop;
+  const profitto = (livello - a.entrata) * a.dir * a.dim * (a.cambio || 1);
+  return { testo: (presoTp ? 'take profit' : 'stop') + ' a ' + Motore.fmtPrezzo(livello) + ', circa ' + soldi(profitto, ''), profitto, presoTp };
+}
+
+async function giroRobot(env, ctx, robot, lista, rifEpic, ora, opz) {
   const M = Motore, out = { azioni: [] };
-  robot.aperte = robot.aperte || []; robot.inAttesa = robot.inAttesa || []; robot.chiuse = robot.chiuse || {}; robot.diario = robot.diario || [];
-  const stile = M.STILI[robot.stile] ? robot.stile : 'swing', S = M.STILI[stile];
+  opz = opz || {};
+  const base = robotBase();
+  for (const k of Object.keys(base)) if (robot[k] == null) robot[k] = base[k];
+  robot.battito = { quando: ora };
   const nota = (tipo, testo) => { annota(robot, ora, tipo, testo); out.azioni.push(tipo + ': ' + testo); };
   const errore = testo => {
     /* lo stesso errore si scrive una volta ogni mezz'ora: ogni scrittura in
        KV conta, e un errore che si ripete ogni minuto le brucerebbe tutte */
-    const u = robot.ultimoErrore;
-    if (u && u.testo === testo && ora - u.quando < 30 * 60000) return;
-    robot.ultimoErrore = { testo, quando: ora };
+    for (const t of Object.keys(robot.errori)) if (ora - robot.errori[t] >= 30 * 60000) delete robot.errori[t];
+    if (robot.errori[testo]) return;
+    robot.errori[testo] = ora;
     nota('errore', testo);
   };
+
+  /* 0. il comando */
+  const cmd = applicaComando(robot, opz.comando, ora, nota);
+  out.comando = cmd;
+  const stile = stileDi(robot), S = M.STILI[stile];
 
   /* 1. il conto e il tetto */
   const conto = await contoAdesso(env);
   if (!conto) throw new Error('Capital.com non manda il conto.');
+  if (robot.capitaleIniziale == null && robot.acceso) robot.capitaleIniziale = conto.patrimonio;
   const perdita = Math.max(0, robot.capitaleIniziale - conto.patrimonio);
   out.conto = conto; out.perdita = perdita;
+  Object.assign(robot.battito, { patrimonio: conto.patrimonio, disponibile: conto.disponibile, valuta: conto.valuta });
+  if (cmd === 'avvia') {
+    const quanti = Math.min(5, +env.ROBOT_MERCATI_PER_GIRO > 0 ? +env.ROBOT_MERCATI_PER_GIRO : MERCATI_PER_GIRO[stile] || 1);
+    await telegram(env, '<b>ROBOT ACCESO</b>\nPatrimonio di partenza ' + M.fmtNum(robot.capitaleIniziale, 2) + ' ' + html(conto.valuta) +
+      '. Tetto di perdita ' + M.fmtNum(robot.perditaMax, 2) + ': arrivato li\' mi fermo e chiudo tutto.\nFino a ' + robot.maxPosizioni + ' posizioni, profilo Estremo, ' +
+      S.nome + '. Rischio a colpo: ' + M.fmtNum(M.rischioRobot(robot.perditaMax, 'A'), 2) + ' su un A, ' + M.fmtNum(M.rischioRobot(robot.perditaMax, 'C'), 2) + ' su un C.\n' +
+      'Guardo ' + robot.lista.length + ' mercati, ' + quanti + ' al minuto: il giro completo dura ' + Math.ceil(robot.lista.length / quanti) + ' minuti.\n' +
+      'Comandi: /stato · /stop (non apro piu\' niente) · /chiudi (fermo e chiudo tutto)');
+  }
+  let tettoAdesso = false;
   if (robot.acceso && perdita >= robot.perditaMax) {
-    robot.acceso = false; robot.fermato = ora; robot.motivo = 'tetto';
+    robot.acceso = false; robot.fermato = ora; robot.motivo = 'tetto'; robot.chiudiTutto = true; tettoAdesso = true;
     nota('tetto', 'Perdita dall\'avvio ' + M.fmtNum(perdita, 2) + ' ' + conto.valuta + ': tetto di ' + M.fmtNum(robot.perditaMax, 0) + ' raggiunto. Mi fermo e chiudo tutto.');
-    const esiti = await chiudiTutto(env, robot, ora, 'tetto di perdita');
-    await telegram(env, '<b>ROBOT FERMATO · tetto di perdita</b>\nPerdita dall\'avvio ' + M.fmtNum(perdita, 2) + ' ' + html(conto.valuta) +
-      '. Ho chiuso ' + esiti.filter(e => e.ok).length + ' posizioni' + (esiti.some(e => !e.ok) ? ', ' + esiti.filter(e => !e.ok).length + ' NON si sono chiuse: controlla su Capital.com' : '') + '.');
+  }
+  if (robot.chiudiTutto) {
+    const esiti = await chiudiTutto(env, robot, lista, ora, robot.motivo === 'tetto' ? 'tetto di perdita' : 'fermato ' + (robot.motivo || ''));
+    const chiuse = esiti.filter(e => e.ok && !e.giaChiusa).length, male = esiti.filter(e => !e.ok).length;
+    if (tettoAdesso) {
+      await telegram(env, '<b>ROBOT FERMATO · tetto di perdita</b>\nPerdita dall\'avvio ' + M.fmtNum(perdita, 2) + ' ' + html(conto.valuta) +
+        '. Ho chiuso ' + esiti.filter(e => e.ok).length + ' posizioni' + (male ? ', ' + male + ' NON si sono chiuse: riprovo a ogni minuto, controlla su Capital.com' : '') + '.');
+    } else if (chiuse || male) {
+      await telegram(env, '<b>ROBOT · chiusura</b>\nChiuse ' + chiuse + ' posizioni' + (male ? ', ' + male + ' NON si sono chiuse: riprovo a ogni minuto, controlla su Capital.com' : '') + '.');
+    }
+    if (!robot.aperte.length && !robot.inAttesa.length) robot.chiudiTutto = false;
     return out;
   }
 
   /* 2. quello che e' successo su Capital.com dall'ultimo giro */
   const presenti = new Map(lista.map(p => [p.id, p]));
   for (const w of robot.inAttesa.slice()) {
-    /* un ordine partito senza conferma (la rete, un timeout): se la
-       posizione e' comparsa, e' sua */
-    const trovata = lista.find(p => p.epic === w.epic && p.dir === w.dir && !robot.aperte.some(a => a.id === p.id) && Math.abs(p.aperta - w.quando) < 10 * 60000);
+    const trovata = trovaOrdine(robot, lista, w);
     if (trovata) {
       robot.aperte.push({ ...w, id: trovata.id, entrata: trovata.entrata, dim: trovata.dim, aperta: trovata.aperta });
       robot.inAttesa = robot.inAttesa.filter(x => x !== w);
@@ -1965,27 +2147,29 @@ async function giroRobot(env, ctx, robot, lista, rifEpic, ora) {
   }
   for (const a of robot.aperte.slice()) {
     if (presenti.has(a.id)) continue;
-    robot.aperte = robot.aperte.filter(x => x.id !== a.id);
-    robot.chiuse[a.epic] = { dir: a.dir, quando: ora };
-    nota('chiusa', nomePos(a) + ': l\'ha chiusa Capital.com (stop o take profit).');
-    await telegram(env, '<b>CHIUSA · ' + html(nomePos(a)) + '</b>\nL\'ha chiusa Capital.com: e\' scattato lo stop o il take profit.' + html(piede(robot, conto)));
+    const fine = await comeEFinita(env, a);
+    togli(robot, a, ora, fine.profitto);
+    nota('chiusa', nomePos(a) + ': l\'ha chiusa Capital.com (' + fine.testo + ').');
+    await telegram(env, '<b>' + (fine.presoTp ? 'INCASSATO' : 'CHIUSA') + ' · ' + html(nomePos(a)) + '</b>\nL\'ha chiusa Capital.com: ' + html(fine.testo) + '.' + html(piede(robot, conto)));
   }
 
-  /* 3. le sue posizioni, a rotazione, con un tetto ai calcoli da capo */
-  const limite = +env.ROBOT_CALCOLI > 0 ? +env.ROBOT_CALCOLI : 4;
+  /* 3. le sue posizioni, a rotazione, con un tetto ai calcoli da capo. Un
+     calcolo resta per gli ingressi, se e' acceso. */
+  const limite = +env.ROBOT_CALCOLI > 0 ? +env.ROBOT_CALCOLI : 3;
+  const perPosizioni = robot.acceso ? Math.max(1, limite - 1) : limite;
   const giro = Math.floor(ora / 60000), n = robot.aperte.length;
   const ordine = robot.aperte.map((_, i) => robot.aperte[(i + giro) % n]);
   for (const a of ordine) {
     const pos = presenti.get(a.id);
     if (!pos || pos.stato !== 'TRADEABLE') continue;
     try {
-      if ((ctx.freddi || 0) >= limite && await sarebbeFreddo(env, ctx, pos.epic, S, rifEpic)) { out.rimandate = (out.rimandate || 0) + 1; continue; }
+      if ((ctx.freddi || 0) >= perPosizioni && await sarebbeFreddo(env, ctx, pos.epic, S, rifEpic)) { out.rimandate = (out.rimandate || 0) + 1; continue; }
       const c = await consiglioPer(env, ctx, pos, { stile, R: a.R, stopIniziale: a.stopIniziale, parziale: true, rinforzata: true, passo: a.passo }, rifEpic, ora);
       const d = M.robotUscita(c, { dir: pos.dir, stop: pos.stop }, stile);
       if (d.azione === 'chiudi') {
         const r = await chiudiPosizione(env, pos.id);
-        robot.aperte = robot.aperte.filter(x => x.id !== a.id);
-        robot.chiuse[a.epic] = { dir: a.dir, quando: ora };
+        const profitto = r.profitto != null ? r.profitto : (c ? c.pnlConto : null);
+        togli(robot, a, ora, profitto);
         const esito = r.profitto != null ? ' Risultato ' + soldi(r.profitto, r.valuta) + '.' : '';
         nota('chiusa', nomePos(a) + ': ' + d.motivo + esito);
         await telegram(env, '<b>CHIUSA · ' + html(nomePos(a)) + '</b>\n' + html(d.motivo) + html(esito) + html(piede(robot, conto)));
@@ -1993,58 +2177,85 @@ async function giroRobot(env, ctx, robot, lista, rifEpic, ora) {
         const dmk = await leggi(env, 'markets/' + pos.epic, new URLSearchParams());
         const livello = arrotonda(d.livello, decimaliDi(dmk, d.livello));
         await spostaStop(env, pos.id, livello, a.tp);
+        a.stop = livello;
         nota('stop', nomePos(a) + ': stop a ' + M.fmtPrezzo(livello) + '. ' + d.motivo);
-        await telegram(env, '<b>STOP SPOSTATO · ' + html(nomePos(a)) + '</b>\nStop a ' + M.fmtPrezzo(livello) + '. ' + html(d.motivo));
+        /* nel rapido gli stop si muovono spesso: su Telegram arrivano solo
+           aperture e chiusure */
+        if (stile !== 'rapido') await telegram(env, '<b>STOP SPOSTATO · ' + html(nomePos(a)) + '</b>\nStop a ' + M.fmtPrezzo(livello) + '. ' + html(d.motivo));
       }
     } catch (e) { errore(nomePos(a) + ': ' + e.message); }
   }
 
   /* 4. gli ingressi */
   if (robot.acceso && (robot.lista || []).length) {
-    const quanti = +env.ROBOT_MERCATI_PER_GIRO > 0 ? Math.min(5, +env.ROBOT_MERCATI_PER_GIRO) : 1;
-    for (let i = 0; i < quanti; i++) {
-      const epic = robot.lista[(giro * quanti + i) % robot.lista.length];
-      try { out.entrata = await entrataRobot(env, ctx, robot, epic, lista, conto, perdita, rifEpic, ora, nota); }
-      catch (e) { errore(epic + ': ' + e.message); }
+    const quanti = Math.min(5, +env.ROBOT_MERCATI_PER_GIRO > 0 ? +env.ROBOT_MERCATI_PER_GIRO : MERCATI_PER_GIRO[stile] || 1);
+    const lunghezza = robot.lista.length;
+    for (const k of Object.keys(robot.rifiuti)) if (ora - robot.rifiuti[k].quando >= PAUSA_RIFIUTO) delete robot.rifiuti[k];
+    for (let i = 0; i < Math.min(quanti, lunghezza); i++) {
+      const epic = robot.lista[(giro * quanti + i) % lunghezza];
+      let e;
+      try { e = await entrataRobot(env, ctx, robot, epic, lista, conto, perdita, rifEpic, ora, nota, opz.salva, limite); }
+      catch (err) { errore(epic + ': ' + err.message); e = { epic, motivo: 'errore: ' + err.message }; }
+      if (e.rimandato) { out.rimandate = (out.rimandate || 0) + 1; continue; }
+      robot.visti[epic] = { quando: ora, punti: e.punti != null ? e.punti : null, motivo: e.aperta ? 'aperta' : e.motivo };
+      out.entrate = (out.entrate || []).concat([e]);
     }
+    /* solo i mercati della lista */
+    for (const k of Object.keys(robot.visti)) if (!robot.lista.includes(k)) delete robot.visti[k];
   }
+  robot.battito.calcoli = ctx.freddi || 0;
+  robot.battito.rimandate = out.rimandate || 0;
   return out;
 }
 
-async function entrataRobot(env, ctx, robot, epic, lista, conto, perdita, rifEpic, ora, nota) {
-  const M = Motore, stile = M.STILI[robot.stile] ? robot.stile : 'swing', S = M.STILI[stile];
+async function entrataRobot(env, ctx, robot, epic, lista, conto, perdita, rifEpic, ora, nota, salva, limite) {
+  const M = Motore, stile = stileDi(robot), S = M.STILI[stile];
   if (robot.inAttesa.some(w => w.epic === epic)) return { epic, motivo: 'ordine in attesa di conferma' };
+  if (lista.some(x => x.epic === epic)) return { epic, motivo: 'gia\' dentro su questo mercato' };
+  const rifiuto = robot.rifiuti[epic];
+  if (rifiuto && ora - rifiuto.quando < PAUSA_RIFIUTO) {
+    return { epic, motivo: 'Capital.com ha rifiutato l\'ordine (' + rifiuto.perche + '): riprovo fra ' + Math.ceil((PAUSA_RIFIUTO - (ora - rifiuto.quando)) / 60000) + ' minuti' };
+  }
   const d = await leggi(env, 'markets/' + epic, new URLSearchParams());
   const sn = d.snapshot || {};
   if (sn.marketStatus !== 'TRADEABLE') return { epic, motivo: 'mercato chiuso' };
+  if ((ctx.freddi || 0) >= limite && await sarebbeFreddo(env, ctx, epic, S, rifEpic)) return { epic, rimandato: true };
   const cs = await candeleDi(env, epic, S.segnale, S.candeleVive);
   const ct = await candeleDi(env, epic, S.tempo, S.candeleTempo);
   const rif = epic === rifEpic ? null : await riferimentoDi(env, ctx, rifEpic, S);
   const folle = await follaDi(env, ctx, [epic]);
   const prezzo = sn.bid > 0 && sn.offer > 0 ? { bid: sn.bid, ask: sn.offer } : null;
   const an = M.analizza(cs, ct, { ser: serDi(ctx, cs, rif), rif, percLunghi: folle[epic], prezzo });
-  if (!M.pronto(an, M.ROBOT.profilo)) return { epic, punti: an.punti, motivo: 'nessun segnale' };
+  if (!M.pronto(an, M.ROBOT.profilo)) return { epic, punti: an.ok ? an.punti : null, motivo: an.ok ? 'nessun segnale' : an.motivo };
 
   let leve = null;
   try { leve = (await leggi(env, 'accounts/preferences', new URLSearchParams())).leverages || null; } catch (e) { leve = null; }
   const strumento = M.strumentoDa(d, leve);
   const cambio = await cambioVerso(env, strumento.valuta, conto.valuta);
-  const p = M.piano({ an, budget: robot.budget, profilo: M.ROBOT.profilo, stile, strumento, cambio,
+  const p = M.piano({ an, budget: robot.perditaMax, profilo: M.ROBOT.profilo, stile, strumento, cambio,
                       notte: M.notteDa(d.instrument && d.instrument.overnightFee) || undefined });
-  /* il rischio gia' in gioco: per ogni sua posizione, quanto si perde se
-     scatta lo stop che c'e' adesso su Capital.com (a pareggio vale zero) */
+  /* il rischio gia' in gioco: per ogni sua posizione, quanto si perde ancora
+     DA ADESSO se scatta lo stop che c'e' su Capital.com. Il tetto si misura
+     sul patrimonio, che il risultato aperto lo contiene gia': una posizione
+     in guadagno con lo stop a pareggio rischia di restituire quel guadagno. */
   const rischioAperto = robot.aperte.reduce((t, a) => {
     const pos = lista.find(x => x.id === a.id);
-    const stop = pos && pos.stop != null ? pos.stop : a.stopIniziale;
-    return t + Math.max(0, (a.entrata - stop) * a.dir) * a.dim * (a.cambio || 1);
-  }, 0);
+    const stop = pos && pos.stop != null ? pos.stop : (a.stop != null ? a.stop : a.stopIniziale);
+    const px = pos && pos.bid > 0 && pos.ask > 0 ? (a.dir > 0 ? pos.bid : pos.ask) : a.entrata;
+    return t + Math.max(0, (px - stop) * a.dir) * a.dim * (a.cambio || 1);
+  }, 0) + robot.inAttesa.reduce((t, w) => t + w.R * w.dim * (w.cambio || 1), 0);
   const dec = M.robotEntrata({
     an, piano: p, ora, stile,
-    stato: { aperte: lista.length, maxPosizioni: robot.maxPosizioni, residuo: robot.perditaMax - perdita, rischioAperto, disponibile: conto.disponibile },
-    giaDentro: lista.some(x => x.epic === epic), chiusaDiRecente: robot.chiuse[epic],
+    stato: { aperte: lista.length + robot.inAttesa.length, maxPosizioni: robot.maxPosizioni, tetto: robot.perditaMax,
+             residuo: robot.perditaMax - perdita, rischioAperto, disponibile: conto.disponibile },
+    giaDentro: false, chiusaDiRecente: robot.chiuse[epic],
     orario: M.orari(d.instrument && d.instrument.openingHours, ora),
   });
   if (!dec.apri) return { epic, punti: an.punti, motivo: dec.motivo };
+
+  /* un attimo prima dell'ordine: e' arrivato un Ferma? */
+  const comando = await leggiKV(env, 'robot:comando');
+  if (comando && comando.id !== robot.comandoVisto && comando.azione === 'ferma') return { epic, punti: an.punti, motivo: 'fermato adesso: niente ordine' };
 
   const decimali = decimaliDi(d, p.entrata);
   const stop = arrotonda(dec.stop, decimali), tp = arrotonda(dec.tp, decimali);
@@ -2052,19 +2263,26 @@ async function entrataRobot(env, ctx, robot, epic, lista, conto, perdita, rifEpi
   const attesa = { epic, nome, dir: dec.dir, dim: dec.dim, R: dec.R, stopIniziale: stop, tp, cambio, valuta: strumento.valuta,
                    passo: strumento.passo, quando: ora, punti: an.punti, grado: an.grado };
   robot.inAttesa.push(attesa);
+  /* lo stato si salva PRIMA dell'ordine: se il giro muore a meta' (la rete,
+     il tempo di calcolo), quello dopo sa che c'era un ordine in volo e
+     adotta la posizione quando compare */
+  if (salva) await salva();
   let r;
   try { r = await apriPosizione(env, epic, dec.dir, dec.dim, stop, tp); }
   catch (e) {
     /* rifiutato: non c'e' niente da aspettare. Altro errore (rete): resta in
        attesa, e se la posizione compare il giro dopo la si adotta */
-    if (/rifiutato/i.test(e.message)) robot.inAttesa = robot.inAttesa.filter(x => x !== attesa);
+    if (/rifiutato/i.test(e.message)) {
+      robot.inAttesa = robot.inAttesa.filter(x => x !== attesa);
+      robot.rifiuti[epic] = { quando: ora, perche: e.message.replace(/^.*?:\s*/, '').slice(0, 80) };
+    }
     throw e;
   }
   robot.inAttesa = robot.inAttesa.filter(x => x !== attesa);
   const posizione = { ...attesa, id: r.id, entrata: r.livello || dec.entrata, dim: r.dim, aperta: ora };
   delete posizione.quando;
   robot.aperte.push(posizione);
-  lista.push({ id: r.id, epic, dir: dec.dir, stop, stato: 'TRADEABLE' });
+  lista.push({ id: r.id, epic, dir: dec.dir, stop, dim: r.dim, stato: 'TRADEABLE' });
   const verbo = dec.dir > 0 ? 'Comprate' : 'Vendute';
   nota('aperta', nomePos(posizione) + ': ' + M.fmtNum(r.dim, r.dim % 1 ? 2 : 0) + ' a circa ' + M.fmtPrezzo(posizione.entrata) + ', stop ' + M.fmtPrezzo(stop) + ', take profit ' + M.fmtPrezzo(tp) + '.');
   await telegram(env, '<b>APERTA · ' + html(nomePos(posizione)) + '</b> · grado ' + an.grado + ' (' + M.segno(an.punti) + ')\n' +
@@ -2072,30 +2290,32 @@ async function entrataRobot(env, ctx, robot, epic, lista, conto, perdita, rifEpi
     'Stop ' + M.fmtPrezzo(stop) + ' · take profit ' + M.fmtPrezzo(tp) + '\n' +
     'Rischio ' + M.fmtNum(dec.rischio, 2) + ' ' + html(conto.valuta) + ' · margine ' + M.fmtNum(dec.margine, 2) + ' ' + html(conto.valuta) + '\n' +
     html(dec.motivo) + html(piede(robot, conto)));
-  return { epic, aperta: true, id: r.id, dim: r.dim };
+  return { epic, punti: an.punti, aperta: true, id: r.id, dim: r.dim };
 }
 
+/* Avvia: scrive il comando, con il punto di partenza misurato adesso. Lo
+   applica il giro del cron, entro un minuto: e' lui che manda ROBOT ACCESO
+   su Telegram. Se quel messaggio non arriva, il cron non gira. */
 async function avviaRobot(env, ora, b, origine) {
   const M = Motore;
   const conto = await contoAdesso(env);
   if (!conto) throw new Error('Capital.com non manda il conto: non posso fissare il punto di partenza.');
-  const vecchio = (await leggiKV(env, 'robot')) || {};
   const lista = (Array.isArray(b.lista) ? b.lista : []).map(String).filter(e => /^[A-Za-z0-9._-]{1,40}$/.test(e)).slice(0, 60);
   if (!lista.length) throw new Error('La lista dei mercati e\' vuota.');
   const perditaMax = Math.min(+b.perditaMax > 0 ? +b.perditaMax : 50, conto.patrimonio > 0 ? conto.patrimonio : Infinity);
-  const robot = {
-    ...ROBOT_BASE, ...vecchio,
-    acceso: true, avviato: ora, fermato: null, motivo: '', ultimoErrore: null,
-    capitaleIniziale: conto.patrimonio, perditaMax,
-    maxPosizioni: Math.max(1, Math.min(10, Math.round(+b.maxPosizioni) || 10)),
-    budget: +b.budget > 0 ? +b.budget : perditaMax,
-    stile: M.STILI[b.stile] ? b.stile : 'swing', lista,
-    riferimento: /^[A-Za-z0-9._-]{1,40}$/.test(String(b.riferimento || '')) ? String(b.riferimento) : 'US500',
-    valuta: conto.valuta,
+  const prima = await leggiKV(env, 'robot:comando'), stato = await leggiKV(env, 'robot');
+  /* un "ferma e chiudi" che il giro non ha ancora applicato non si perde */
+  const chiudiPrima = !!(prima && prima.azione === 'ferma' && prima.chiudi && prima.id !== (stato && stato.comandoVisto)) || !!(prima && prima.chiudiPrima && prima.id !== (stato && stato.comandoVisto));
+  const comando = {
+    id: idComando(ora), quando: ora, azione: 'avvia', chi: 'dall\'app', chiudiPrima,
+    capitaleIniziale: conto.patrimonio, valuta: conto.valuta,
+    impostazioni: {
+      perditaMax, maxPosizioni: Math.max(1, Math.min(10, Math.round(+b.maxPosizioni) || 10)),
+      stile: M.STILI[b.stile] ? b.stile : 'swing', lista,
+      riferimento: /^[A-Za-z0-9._-]{1,40}$/.test(String(b.riferimento || '')) ? String(b.riferimento) : 'US500',
+    },
   };
-  annota(robot, ora, 'acceso', 'Acceso. Tetto di perdita ' + M.fmtNum(perditaMax, 2) + ' ' + conto.valuta + ', fino a ' + robot.maxPosizioni +
-    ' posizioni, budget ' + M.fmtNum(robot.budget, 0) + ', ' + lista.length + ' mercati, ' + M.STILI[robot.stile].nome + '.');
-  await scriviKV(env, 'robot', robot);
+  await scriviKV(env, 'robot:comando', comando);
   let webhook = null;
   if (env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT && origine) {
     try {
@@ -2106,34 +2326,63 @@ async function avviaRobot(env, ora, b, origine) {
       });
       webhook = (await r.json().catch(() => ({}))).ok === true;
     } catch (e) { webhook = false; }
-    await telegram(env, '<b>ROBOT ACCESO</b>\nPatrimonio di partenza ' + M.fmtNum(conto.patrimonio, 2) + ' ' + html(conto.valuta) +
-      '. Tetto di perdita ' + M.fmtNum(perditaMax, 2) + ': arrivato li\' mi fermo e chiudo tutto.\nFino a ' + robot.maxPosizioni + ' posizioni, ' +
-      lista.length + ' mercati, profilo Estremo, ' + M.STILI[robot.stile].nome + '.\n' +
-      (webhook ? 'Comandi: /stato · /stop (non apro piu\' niente) · /chiudi (fermo e chiudo tutto)' : 'I comandi da Telegram non sono attivi: fermami dall\'app.'));
   }
-  return { robot, webhook };
+  return { comando, webhook, conto };
 }
 
+/* Ferma: scrive il comando (il giro lo applica e da li' non apre piu'
+   niente) e, se chiudi, chiude subito quello che sa essere del robot. Il
+   giro dopo richiude quello che fosse rimasto: anche una posizione aperta
+   in quel minuto, da un giro che il Ferma non l'aveva ancora visto. */
 async function fermaRobot(env, ora, chiudi, chi) {
-  const robot = { ...ROBOT_BASE, ...((await leggiKV(env, 'robot')) || {}) };
-  const eraAcceso = robot.acceso;
-  robot.acceso = false; robot.fermato = ora; robot.motivo = chi;
-  annota(robot, ora, 'fermo', 'Fermato ' + chi + (chiudi ? ', con chiusura di tutte le posizioni.' : '. Non apro piu\' niente; le posizioni aperte le porto a fine con le loro regole.'));
-  const esiti = chiudi ? await chiudiTutto(env, robot, ora, 'fermato ' + chi) : [];
-  await scriviKV(env, 'robot', robot);
-  return { robot, esiti, eraAcceso };
+  const comando = { id: idComando(ora), quando: ora, azione: 'ferma', chiudi: !!chiudi, chi };
+  await scriviKV(env, 'robot:comando', comando);
+  const stato = { ...robotBase(), ...((await leggiKV(env, 'robot')) || {}) };
+  const eraAcceso = !!stato.acceso;
+  let esiti = [];
+  if (chiudi) {
+    const lista = ((await leggi(env, 'positions', new URLSearchParams())).positions || []).map(daCapital);
+    const copia = JSON.parse(JSON.stringify(stato));
+    copia.inAttesa = copia.inAttesa || [];
+    esiti = (await chiudiTutto(env, copia, lista, ora, 'fermato ' + chi)).filter(e => !e.giaChiusa || !e.ok);
+  }
+  return { esiti, eraAcceso, comando };
+}
+
+function comandoPendente(robot, comando) {
+  return comando && comando.id !== (robot && robot.comandoVisto) ? comando : null;
+}
+
+/* in una riga: perche' non entra, mercato per mercato */
+function riassuntoVisti(robot) {
+  const v = Object.entries(robot.visti || {});
+  if (!v.length) return '';
+  const conta = {};
+  for (const [, x] of v) {
+    const m = String(x.motivo || '').replace(/\s*\(.*$/, '').replace(/^segnale [ABC] /, 'segnale ').replace(/:.*$/, '');
+    conta[m] = (conta[m] || 0) + 1;
+  }
+  return Object.entries(conta).sort((a, b) => b[1] - a[1]).map(([m, k]) => k + ' ' + m).join(' · ');
 }
 
 async function testoStato(env) {
-  const M = Motore, robot = await leggiKV(env, 'robot');
-  if (!robot) return 'Il robot non e\' mai stato acceso.';
+  const M = Motore, robot = await leggiKV(env, 'robot'), comando = await leggiKV(env, 'robot:comando');
+  const pend = comandoPendente(robot, comando);
+  if (!robot && !pend) return 'Il robot non e\' mai stato acceso.';
+  const r = robot || {};
   let conto = null;
   try { conto = await contoAdesso(env); } catch (e) { conto = null; }
-  const righe = ['<b>ROBOT ' + (robot.acceso ? 'ACCESO' : 'SPENTO') + '</b>' + (robot.acceso ? '' : (robot.motivo === 'tetto' ? ' · fermato dal tetto di perdita' : ''))];
-  if (conto) righe.push('Dall\'avvio: ' + soldi(conto.patrimonio - robot.capitaleIniziale, conto.valuta) + ' (tetto ' + M.fmtNum(robot.perditaMax, 0) + ')');
-  righe.push('Posizioni del robot: ' + (robot.aperte || []).length + '/' + robot.maxPosizioni);
-  for (const a of robot.aperte || []) righe.push('· ' + html(nomePos(a)) + ' ' + M.fmtNum(a.dim, a.dim % 1 ? 2 : 0) + ' da ' + M.fmtPrezzo(a.entrata));
-  const ult = (robot.diario || [])[0];
+  const righe = ['<b>ROBOT ' + (r.acceso ? 'ACCESO' : 'SPENTO') + '</b>' + (r.acceso ? ' · ' + M.STILI[stileDi(r)].nome : (r.motivo === 'tetto' ? ' · fermato dal tetto di perdita' : ''))];
+  if (pend) righe.push(pend.azione === 'avvia' ? 'Si accende al prossimo giro.' : 'Si ferma al prossimo giro.');
+  const ora = Date.now();
+  if (r.battito) righe.push('Ultimo giro: ' + Math.max(0, Math.round((ora - r.battito.quando) / 60000)) + ' minuti fa' + (ora - r.battito.quando > 15 * 60000 ? ' — il cron non gira?' : '') + '.');
+  else if (pend) righe.push('Nessun giro ancora: se resta cosi\' piu\' di due minuti, su Cloudflare manca il Cron Trigger (* * * * *).');
+  if (conto && r.capitaleIniziale != null) righe.push('Dall\'avvio: ' + soldi(conto.patrimonio - r.capitaleIniziale, conto.valuta) + ' (tetto ' + M.fmtNum(r.perditaMax, 0) + ')');
+  righe.push('Posizioni del robot: ' + (r.aperte || []).length + '/' + (r.maxPosizioni || 10) + (r.colpi && r.colpi.n ? ' · colpi ' + r.colpi.vinti + ' vinti su ' + r.colpi.n : ''));
+  for (const a of r.aperte || []) righe.push('· ' + html(nomePos(a)) + ' ' + M.fmtNum(a.dim, a.dim % 1 ? 2 : 0) + ' da ' + M.fmtPrezzo(a.entrata));
+  const visti = riassuntoVisti(r);
+  if (r.acceso && visti) righe.push('Ultima occhiata ai mercati: ' + html(visti));
+  const ult = (r.diario || [])[0];
   if (ult) righe.push('Ultima cosa: ' + html(ult.testo));
   return righe.join('\n');
 }
@@ -2156,7 +2405,8 @@ async function comandoTelegram(req, env, url) {
     } else if (cmd === '/chiudi') {
       const r = await fermaRobot(env, ora, true, 'da Telegram');
       const male = r.esiti.filter(e => !e.ok).length;
-      await telegram(env, '<b>ROBOT FERMATO, POSIZIONI CHIUSE</b>\nChiuse ' + r.esiti.filter(e => e.ok).length + '.' + (male ? ' ' + male + ' NON si sono chiuse: controlla su Capital.com.' : ''));
+      await telegram(env, '<b>ROBOT FERMATO, POSIZIONI CHIUSE</b>\nChiuse ' + r.esiti.filter(e => e.ok).length + '.' + (male ? ' ' + male + ' NON si sono chiuse: riprovo al prossimo giro, controlla su Capital.com.' : '') +
+        '\nSe nel frattempo ne fosse partita un\'altra, la chiudo al prossimo giro.');
     } else if (cmd === '/stato') {
       await telegram(env, await testoStato(env));
     } else {
@@ -2172,6 +2422,16 @@ async function comandoTelegram(req, env, url) {
    fatto l'altro (una posizione aperta e dimenticata). Il blocco vale per la
    copia del Worker in cui gira; i giri del cron di solito finiscono li'. */
 let giroInCorso = null;
+/* Le occhiate ai mercati fra una scrittura e l'altra stanno qui, in memoria,
+   finche' questa copia del Worker resta viva, e vanno in KV con la scrittura
+   dopo (al massimo cinque minuti). Senza, ogni giro ripartirebbe dalla
+   copia in KV e si perderebbero quelle dei giri che non scrivono. */
+let vistiInMemoria = {};
+function unisciVisti(a, b) {
+  const out = { ...(a || {}) };
+  for (const [k, v] of Object.entries(b || {})) if (!out[k] || (v && v.quando > out[k].quando)) out[k] = v;
+  return out;
+}
 async function sorveglia(env, ora) {
   if (giroInCorso) return { saltato: 'il giro di prima non e\' ancora finito' };
   giroInCorso = sorvegliaUnGiro(env, ora);
@@ -2181,31 +2441,53 @@ async function sorveglia(env, ora) {
 async function sorvegliaUnGiro(env, ora) {
   ora = ora || Date.now();
   if (!env.MEMORIA) return { saltato: 'manca il deposito MEMORIA' };
-  const robot = await leggiKV(env, 'robot');
-  const robotVivo = !!(robot && (robot.acceso || (robot.aperte || []).length || (robot.inAttesa || []).length));
+  const letto = await leggiKV(env, 'robot');
+  const comando = await leggiKV(env, 'robot:comando');
+  const pendente = comandoPendente(letto, comando);
+  const robotVivo = !!(pendente || (letto && (letto.acceso || (letto.aperte || []).length || (letto.inAttesa || []).length || letto.chiudiTutto)));
   const avvisi = !!(env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT);
   if (!avvisi && !robotVivo) return { saltato: 'avvisi spenti' };
   const imp = (await leggiKV(env, 'impostazioni')) || {};
-  const rifEpic = (robotVivo && robot.riferimento) || imp.riferimento || env.RIFERIMENTO || 'US500';
   const ctx = { rif: {}, folle: {}, freddi: 0 };
   const lista = await posizioniAperte(env);
-  let esitoRobot = null;
+  let esitoRobot = null, robot = letto;
   if (robotVivo) {
-    const prima = JSON.stringify(robot);
-    try { esitoRobot = await giroRobot(env, ctx, robot, lista, rifEpic, ora); }
+    robot = { ...robotBase(), ...(letto || {}) };
+    robot.visti = unisciVisti(robot.visti, vistiInMemoria);
+    const prima = sostanza(robot);
+    /* KV accetta una scrittura al secondo sulla stessa chiave: prima e dopo
+       un ordine si salva due volte in pochi istanti, quindi si aspetta il
+       giusto, e se KV dice di no si riprova una volta */
+    let ultimaScritta = 0;
+    const salva = async () => {
+      robot.scritto = ora;
+      const attesa = ultimaScritta + 1100 - Date.now();
+      if (attesa > 0) await new Promise(ok => setTimeout(ok, attesa));
+      try { await scriviKV(env, 'robot', robot); }
+      catch (e) { await new Promise(ok => setTimeout(ok, 1100)); await scriviKV(env, 'robot', robot); }
+      ultimaScritta = Date.now();
+    };
+    /* il riferimento dipende dallo stile, che un Avvia puo' cambiare: lo
+       decide il giro dopo aver letto il comando, qui serve solo il nome */
+    const rifEpic = (pendente && pendente.impostazioni && pendente.impostazioni.riferimento) || robot.riferimento || imp.riferimento || env.RIFERIMENTO || 'US500';
+    try { esitoRobot = await giroRobot(env, ctx, robot, lista, rifEpic, ora, { comando, salva }); }
     catch (e) {
       esitoRobot = { errore: e.message };
-      if (!robot.ultimoErrore || robot.ultimoErrore.testo !== e.message || ora - robot.ultimoErrore.quando > 30 * 60000) {
-        robot.ultimoErrore = { testo: e.message, quando: ora };
+      robot.errori = robot.errori || {};
+      if (!robot.errori[e.message] || ora - robot.errori[e.message] > 30 * 60000) {
+        robot.errori[e.message] = ora;
         annota(robot, ora, 'errore', e.message);
       }
     }
-    if (JSON.stringify(robot) !== prima) await scriviKV(env, 'robot', robot);
+    vistiInMemoria = { ...robot.visti };
+    if (sostanza(robot) !== prima || ora - (robot.scritto || 0) >= BATTITO_MS) await salva();
   }
+  const rifEpic = (robot && robot.acceso && robot.riferimento) || imp.riferimento || env.RIFERIMENTO || 'US500';
   /* le posizioni del robot le gestisce lui: gli avvisi sono per le altre */
   const delRobot = new Set(((robot && robot.aperte) || []).map(a => a.id));
   const altre = lista.filter(p => !delRobot.has(p.id));
-  const uscite = avvisi ? await sorvegliaUscite(env, ctx, altre, imp, rifEpic, ora) : { saltato: 'avvisi spenti' };
+  const limite = robotVivo ? (+env.ROBOT_CALCOLI > 0 ? +env.ROBOT_CALCOLI : 3) + 1 : Infinity;
+  const uscite = avvisi ? await sorvegliaUscite(env, ctx, altre, imp, rifEpic, ora, limite) : { saltato: 'avvisi spenti' };
   let ingressi = { saltato: 'il robot e\' acceso: gli ingressi li fa lui' };
   if (avvisi && !(robot && robot.acceso)) {
     try { ingressi = await sorvegliaIngressi(env, ctx, lista, imp, rifEpic, ora); }
@@ -2312,6 +2594,7 @@ async function gestisci(req, env, ctx) {
     }
     if (url.pathname === '/api/robot' && req.method === 'GET') {
       const robot = await leggiKV(env, 'robot');
+      const comando = comandoPendente(robot, await leggiKV(env, 'robot:comando'));
       let conto = null, lista = [], problema = null;
       try {
         conto = await contoAdesso(env);
@@ -2319,29 +2602,33 @@ async function gestisci(req, env, ctx) {
       } catch (e) { problema = e.message; }
       const aperte = ((robot && robot.aperte) || []).map(a => {
         const p = lista.find(x => x.id === a.id);
-        return { ...a, prezzo: p ? (a.dir > 0 ? p.bid : p.ask) : null, stop: p ? p.stop : null, presente: !!p };
+        return { ...a, prezzo: p ? (a.dir > 0 ? p.bid : p.ask) : null, stop: p ? p.stop : (a.stop != null ? a.stop : null), presente: !!p };
       });
       return json({
-        versione: VERSIONE, demo: eDemo(env), memoria: !!env.MEMORIA, telegram: !!(env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT),
-        robot: robot ? { ...robot, aperte } : null, conto, problema,
-        risultato: robot && conto && robot.capitaleIniziale != null ? conto.patrimonio - robot.capitaleIniziale : null,
+        versione: VERSIONE, demo: eDemo(env), memoria: !!env.MEMORIA, telegram: !!(env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT), ora: Date.now(),
+        robot: robot ? { ...robot, aperte } : null,
+        comando: comando ? { azione: comando.azione, quando: comando.quando, chiudi: !!comando.chiudi, impostazioni: comando.impostazioni || null } : null,
+        conto, problema,
+        /* con un Avvia in arrivo il punto di partenza vecchio non vale piu' */
+        risultato: robot && conto && robot.capitaleIniziale != null && !(comando && comando.azione === 'avvia') ? conto.patrimonio - robot.capitaleIniziale : null,
       }, 200, extra);
     }
     if (url.pathname === '/api/robot/avvia' && req.method === 'POST') {
       if (!env.MEMORIA) return json({ errore: 'Senza il deposito MEMORIA il robot non puo\' ricordare cosa ha aperto: collegalo prima.' }, 400, extra);
       const r = await avviaRobot(env, Date.now(), await req.json(), url.origin);
-      return json({ ok: true, robot: r.robot, webhook: r.webhook }, 200, extra);
+      return json({ ok: true, comando: { azione: 'avvia', quando: r.comando.quando, impostazioni: r.comando.impostazioni }, webhook: r.webhook }, 200, extra);
     }
     if (url.pathname === '/api/robot/ferma' && req.method === 'POST') {
+      if (!env.MEMORIA) return json({ errore: 'Senza il deposito MEMORIA non c\'e\' un robot da fermare.' }, 400, extra);
       let b = {};
       try { b = await req.json(); } catch (e) { b = {}; }
       const r = await fermaRobot(env, Date.now(), !!b.chiudi, 'dall\'app');
       if (r.eraAcceso || b.chiudi) {
         await telegram(env, '<b>ROBOT FERMATO</b> dall\'app.\n' + (b.chiudi
-          ? 'Chiuse ' + r.esiti.filter(e => e.ok).length + ' posizioni' + (r.esiti.some(e => !e.ok) ? ', ' + r.esiti.filter(e => !e.ok).length + ' NON si sono chiuse: controlla su Capital.com' : '') + '.'
+          ? 'Chiuse ' + r.esiti.filter(e => e.ok).length + ' posizioni' + (r.esiti.some(e => !e.ok) ? ', ' + r.esiti.filter(e => !e.ok).length + ' NON si sono chiuse: riprovo al prossimo giro, controlla su Capital.com' : '') + '.'
           : 'Non apro piu\' niente; le posizioni aperte le porto a fine con le loro regole.'));
       }
-      return json({ ok: true, robot: r.robot, esiti: r.esiti }, 200, extra);
+      return json({ ok: true, esiti: r.esiti, comando: { azione: 'ferma', quando: r.comando.quando, chiudi: !!b.chiudi } }, 200, extra);
     }
     return json({ errore: 'Non c\'e\' niente qui.' }, 404, extra);
   } catch (e) {

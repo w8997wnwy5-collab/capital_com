@@ -137,18 +137,30 @@ node tools/cuci_worker.js && cd server && npx wrangler deploy
 # Il robot
 
 Va nel cron di ogni minuto, come gli avvisi: servono il deposito `MEMORIA` e
-l'orologio `* * * * *` (A6). Telegram non è obbligatorio, ma senza non ti dice
-cosa fa e non lo puoi fermare da lì.
+l'orologio `* * * * *` (A6). **Senza orologio il robot non gira mai.** Telegram
+non è obbligatorio, ma senza non ti dice cosa fa e non lo puoi fermare da lì.
 
-Si accende dalla scheda **Robot** dell'app: scegli la perdita massima (dall'avvio)
-e quante posizioni al massimo, poi **Avvia**. Quando lo accendi, il ponte collega
+Si accende dalla scheda **Robot** dell'app: scegli lo stile (**Rapido** per
+entrare, incassare e uscire tante volte al giorno), la perdita massima
+(dall'avvio) e quante posizioni al massimo, poi **Avvia**.
+
+*Avvia* non accende il robot direttamente: scrive un comando, e lo applica il
+giro del cron entro un minuto o due. È quel giro che ti manda **ROBOT ACCESO**
+su Telegram. Quindi:
+
+- arriva ROBOT ACCESO → l'orologio gira, il robot lavora;
+- non arriva, e l'app resta su *Si sta accendendo* → manca il Cron Trigger (A6),
+  oppure i giri finiscono in errore: Worker › **Logs**.
+
+Lo stesso per *Ferma*: il comando resta scritto finché il giro lo applica, e un
+giro già partito non lo può cancellare. Quando lo accendi, il ponte collega
 anche i comandi di Telegram:
 
 | Comando | Cosa fa |
 |---|---|
-| `/stato` | acceso o spento, risultato dall'avvio, le sue posizioni |
+| `/stato` | acceso o spento, ultimo giro, risultato dall'avvio, le sue posizioni, perché non entra |
 | `/stop` | non apre più niente; le posizioni aperte le porta a fine con le loro regole |
-| `/chiudi` | si ferma e chiude subito tutte le sue posizioni |
+| `/chiudi` | si ferma e chiude subito tutte le sue posizioni (e al giro dopo quelle partite nel frattempo) |
 
 Funzionano solo dalla tua chat (`TELEGRAM_CHAT`). Il ponte se ne accorge da un
 percorso segreto e da un'intestazione segreta, ricavati dalla `CHIAVE`: se cambi
@@ -158,10 +170,17 @@ Variabili facoltative (tipo Text), per chi ha il piano a pagamento di Cloudflare
 
 | nome | predefinito | cosa cambia |
 |---|---|---|
-| `ROBOT_MERCATI_PER_GIRO` | `1` | quanti mercati della lista guarda a ogni minuto (fino a 5) |
-| `ROBOT_CALCOLI` | `4` | quanti mercati può ricalcolare da capo in un giro |
+| `ROBOT_MERCATI_PER_GIRO` | `1` (Rapido `2`) | quanti mercati della lista guarda a ogni minuto (fino a 5) |
+| `ROBOT_CALCOLI` | `3` | quanti mercati può ricalcolare da capo in un giro, posizioni comprese |
 
-Sul piano gratuito ogni giro ha 10 ms di calcolo: per questo un mercato al minuto.
+Sul piano gratuito ogni giro ha 10 ms di calcolo: per questo pochi mercati al
+minuto. Se nei **Logs** vedi giri finiti con *Exceeded CPU*, metti
+`ROBOT_CALCOLI` = `2` e `ROBOT_MERCATI_PER_GIRO` = `1`.
+
+Le scritture in KV sono contate (mille al giorno gratis): il robot scrive quando
+apre, chiude o sposta uno stop, e comunque ogni cinque minuti per dire che è vivo
+e cosa ha guardato. Per questo *Cosa sta guardando* può essere indietro di
+qualche minuto.
 
 ---
 
@@ -235,12 +254,14 @@ collegata almeno una volta. Si spengono da **Ponte › Solo uscite**.
   che trovi in *Impostazioni › Profilo* su Capital.com (con "Nascondi la mia
   email" di Apple è un indirizzo `…@privaterelay.appleid.com`). La password è
   sempre quella della chiave API.
-- **Il robot non apre niente**: nella scheda *Robot*, sotto *Cosa ha fatto*,
-  c'è il motivo. Se è vuoto, controlla che l'orologio (cron) sia acceso: senza,
-  il robot non gira mai.
+- **Il robot non apre niente**: nella scheda *Robot*, sotto *Cosa sta guardando*,
+  c'è il motivo per ogni mercato. Se in alto c'è l'avviso rosso *Il robot non
+  gira*, o resta su *Si sta accendendo*, manca l'orologio: **Settings › Triggers ›
+  Cron Triggers › Add** › `* * * * *`. Se c'è già, guarda i **Logs**.
 - **«Ordine rifiutato da Capital.com: …»** nel diario: Capital.com dice il perché
   (fondi, taglia, distanza dello stop, mercato chiuso). Il robot passa al mercato
-  dopo e lo stesso errore lo scrive una volta ogni mezz'ora, non ogni minuto.
+  dopo, quel mercato lo lascia stare mezz'ora, e lo stesso errore lo scrive una
+  volta sola.
 - **«Il ponte non risponde»**: l'indirizzo deve essere quello del Worker
   (`https://…workers.dev`), senza niente dopo. Aprilo nel browser: deve dire
   *il ponte è acceso*.

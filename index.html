@@ -298,7 +298,7 @@ var M = window.Motore, X = window.Esempio;
 /* ══════════════════════════════════════════════════════════════
    STATO
    ══════════════════════════════════════════════════════════════ */
-var VERSIONE = '1.0';
+var VERSIONE = '1.1';
 var CHIAVI = { cfg: 'mirino_cfg_v1', mano: 'mirino_mano_v1', segui: 'mirino_segui_v1', libro: 'mirino_libro_v1',
                visti: 'mirino_visti_v1', piani: 'mirino_piani_v1', inviate: 'mirino_imp_inviate_v1' };
 
@@ -767,7 +767,7 @@ function assicuraRischio(pos){
   var cs = S.cs[pos.epic];
   if(!cs || cs.length < 20) return pos;
   var vive = cs.slice(-M.STILI[S.cfg.stile].candeleVive);
-  var R = M.rischioIniziale(vive, M.indicatori(vive), pos.aperta);
+  var R = M.rischioIniziale(vive, M.indicatori(vive), pos.aperta, S.cfg.stile);
   if(!R) return pos;
   pos.R = R;
   if(pos.manuale){ salvaManuale(pos.id, { R: R }); }
@@ -1122,7 +1122,7 @@ function tabRadar(){
   h += '<div class="kpi" onclick="vai(\'colpo\')" style="cursor:pointer">' +
     '<div><div class="l">Budget</div><div class="v">' + (S.cfg.budget ? fmt(S.cfg.budget, 0) : '—') + '</div><div class="s">' + valutaConto() + ' in gioco</div></div>' +
     '<div><div class="l">Rischio a colpo</div><div class="v">' + fmt((S.cfg.budget || 0) * prof.rischio, 0) + '</div><div class="s">' + pc(prof.rischio, 1) + ' · ' + prof.nome + '</div></div>' +
-    '<div><div class="l">Stile</div><div class="v">' + M.STILI[S.cfg.stile].nome + '</div><div class="s">' + (S.cfg.stile === 'swing' ? 'giorni, non ore' : 'fuori prima di sera') + '</div></div></div>';
+    '<div><div class="l">Stile</div><div class="v">' + M.STILI[S.cfg.stile].nome + '</div><div class="s">' + (S.cfg.stile === 'swing' ? 'giorni, non ore' : S.cfg.stile === 'rapido' ? 'entra, incassa, esce' : 'fuori prima di sera') + '</div></div></div>';
 
   h += '<div class="h2">Pronti adesso<span class="r">' + esc(prof.nome) + ' · grado ' + prof.gradi.split('').join(', ') + '</span></div>';
   if(!pronti.length){
@@ -1207,6 +1207,12 @@ function sezioneScoperte(){
 /* ══════════════════════════════════════════════════════════════
    IL COLPO
    ══════════════════════════════════════════════════════════════ */
+function fraseStile(k){
+  return k === 'swing' ? 'Segnale sulle candele giornaliere, momento sulle orarie. Si tiene da qualche giorno a tre settimane.'
+    : k === 'rapido' ? 'Mordi e fuggi: segnale sui quarti d\'ora, momento sui cinque minuti. Incassa tutto a +' + M.regoleDi('rapido').tp2 + 'R, mai piu\' di due ore dentro, fuori prima di sera.'
+    : 'Segnale sulle orarie, momento sui quarti d\'ora. Si esce prima della chiusura: niente notti da pagare.';
+}
+
 function tabColpo(){
   var h = bannerEsempio(), prof = M.PROFILI[S.cfg.profilo];
   h += '<div class="card"><div class="h2" style="margin:0 0 4px">Quanto vuoi mettere in gioco</div>' +
@@ -1219,9 +1225,7 @@ function tabColpo(){
     }).join('') + '</div><p class="piccolo" style="margin:0 0 12px">' + esc(prof.frase) + '</p>' +
     '<div class="seg">' + Object.keys(M.STILI).map(function(k){
       return '<button class="' + (S.cfg.stile === k ? 'on' : '') + '" onclick="impostaStile(\'' + k + '\')">' + M.STILI[k].nome + '</button>';
-    }).join('') + '</div><p class="piccolo" style="margin:8px 0 0">' + (S.cfg.stile === 'swing'
-      ? 'Segnale sulle candele giornaliere, momento sulle orarie. Si tiene da qualche giorno a tre settimane.'
-      : 'Segnale sulle orarie, momento sui quarti d\'ora. Si esce prima della chiusura: niente notti da pagare.') + '</p></div>';
+    }).join('') + '</div><p class="piccolo" style="margin:8px 0 0">' + fraseStile(S.cfg.stile) + '</p></div>';
 
   if(!S.cfg.budget){
     return h + '<div class="card"><div class="vuoto"><b>Prima il budget</b>Scrivi quanto vuoi mettere in gioco: da li\' escono taglia, stop e margine di ogni colpo.</div></div>';
@@ -1283,7 +1287,7 @@ function schedaPiano(ep){
     '<div class="riga"><div>Entrata<b>' + prezzo(p.entrata) + '</b></div><div>Stop<b>' + prezzo(p.stop) + '</b></div>' +
     '<div>Obiettivi<b>' + prezzo(p.tp1) + ' · ' + prezzo(p.tp2) + '</b></div></div></div>';
 
-  var m1 = p.dim / 2 * M.REGOLE.tp1 * p.R * p.cambio, m2 = p.dim / 2 * M.REGOLE.tp2 * p.R * p.cambio;
+  var Rg = M.regoleDi(S.cfg.stile), m1 = p.dim / 2 * Rg.tp1 * p.R * p.cambio, m2 = p.dim / 2 * Rg.tp2 * p.R * p.cambio;
   h += '<div class="card"><div class="liv">' +
     rigaLivello('Entrata', p.tipo === 'mercato' ? 'a mercato' : p.tipo === 'limite' ? 'ordine limite' : 'ordine stop', p.entrata, '', 'var(--mute)') +
     rigaLivello('Stop', pcS((p.stop - p.entrata) / p.entrata, 1), p.stop, '<span class="neg">' + soldiS(-p.perdita) + '</span>', 'var(--warn)') +
@@ -1451,7 +1455,7 @@ function schedaPosizione(p, c){
       'il robot sposta lo stop o la chiude da solo. Non serve fare niente.</p></div>';
   }
   var az = [];
-  if(!p.parziale && c.rMax >= M.REGOLE.tp1 * 0.9) az.push('<button class="btn picc ok" onclick="segna(\'' + esc(p.id) + '\',\'parziale\')">Ho preso meta\'</button>');
+  if(!p.parziale && c.rMax >= M.regoleDi(S.cfg.stile).tp1 * 0.9) az.push('<button class="btn picc ok" onclick="segna(\'' + esc(p.id) + '\',\'parziale\')">Ho preso meta\'</button>');
   if(c.verdetto === 'stop' || (p.manuale && c.faseStop !== 'iniziale')) az.push('<button class="btn picc" onclick="segna(\'' + esc(p.id) + '\',\'stop\')">Stop spostato a ' + prezzo(c.stopRegola) + '</button>');
   if(c.verdetto === 'rinforza') az.push('<button class="btn picc" onclick="segna(\'' + esc(p.id) + '\',\'rinforzata\')">Ho rinforzato</button>');
   if(p.manuale) az.push('<button class="btn picc ' + (c.tono === 'rosso' ? 'ko' : '') + '" onclick="apriChiusura(\'' + esc(p.id) + '\')">Ho chiuso</button>');
@@ -1524,29 +1528,51 @@ function storiaRobot(){
   return S.robotStoria;
 }
 
-function robotRegoleHTML(){
-  var P = M.PROFILI.estremo, Rg = M.REGOLE;
-  return '<div class="h2">Come gioca</div><div class="card"><ul class="elenco" style="margin:0">' +
-    '<li>Guarda un mercato della lista al minuto, a rotazione. Entra quando il segnale e\' A, B o C <b>e</b> il momento e\' "entra ora": mai a prezzo scappato.</li>' +
-    '<li>Rischia ' + pc(P.rischio, 0) + ' del budget su un A, ' + pc(P.rischio * 0.75, 1) + ' su un B, ' + pc(P.rischio * 0.5, 0) + ' su un C. Usa la leva che hai su Capital.com.</li>' +
-    '<li>Ogni posizione nasce con <b>stop loss</b> (' + Rg.stopAtr + ' ATR) e <b>take profit</b> (' + Rg.tp2 + 'R) gia\' su Capital.com: se il ponte si ferma, restano.</li>' +
-    '<li>A +' + Rg.pareggioDa + 'R porta lo stop a pareggio; da +' + Rg.tp1 + 'R lo stop insegue il prezzo a ' + Rg.trailAtr + ' ATR. Niente meta\': lascia correre tutto.</li>' +
-    '<li>Esce se il segnale si gira, dopo il tempo massimo (' + M.STILI.swing.maxBarre + ' giorni in swing), o prima della chiusura in intraday.</li>' +
-    '<li>Non mette mai a rischio piu\' di quanto resta della <b>perdita massima</b>. Se la perdita dall\'avvio la raggiunge, si ferma da solo e chiude tutto.</li>' +
-    '<li>Non tocca le posizioni che apri tu.</li></ul></div>';
+function robotRegoleHTML(stile){
+  stile = M.STILI[stile] ? stile : S.cfg.stile;
+  var Rg = M.regoleDi(stile), St = M.STILI[stile], tetto = S.cfg.robotPerdita || 50, v = valutaConto();
+  var quanti = stile === 'rapido' ? 2 : 1;
+  var tempo = stile === 'swing' ? St.maxBarre + ' giorni' : stile === 'rapido' ? (St.maxBarre / 4) + ' ore' : St.maxBarre + ' ore';
+  return '<div class="h2">Come gioca<span class="r">' + St.nome + '</span></div><div class="card"><ul class="elenco" style="margin:0">' +
+    '<li>Guarda ' + (quanti === 1 ? 'un mercato' : quanti + ' mercati') + ' della lista al minuto, a rotazione. Entra quando il segnale e\' A, B o C <b>e</b> il momento e\' "entra ora": mai a prezzo scappato.</li>' +
+    '<li>La taglia si ragiona sulla <b>perdita massima</b>: con ' + fmt(tetto, 0) + ' ' + esc(v) + ' rischia ' + fmt(M.rischioRobot(tetto, 'A'), 2) + ' su un A, ' +
+      fmt(M.rischioRobot(tetto, 'B'), 2) + ' su un B, ' + fmt(M.rischioRobot(tetto, 'C'), 2) + ' su un C. Se la taglia minima di Capital.com rischia di piu\', va bene fino a meta\' del tetto.</li>' +
+    '<li>Ogni posizione nasce con <b>stop loss</b> (' + Rg.stopAtr + ' ATR) e <b>take profit</b> (+' + Rg.tp2 + 'R) gia\' su Capital.com: se il ponte si ferma, restano.</li>' +
+    '<li>A +' + Rg.pareggioDa + 'R porta lo stop a pareggio; da +' + Rg.tp1 + 'R lo stop insegue il prezzo a ' + Rg.trailAtr + ' ATR. Niente meta\': o tutto al take profit, o lo stop.</li>' +
+    '<li>Esce se il segnale si gira, dopo ' + tempo + (St.chiudiASera ? ', o prima della chiusura' : '') + '.' +
+      (stile === 'rapido' ? ' Sullo stesso mercato puo\' rientrare dopo un quarto d\'ora: entra, incassa, esce, rientra.' : '') + '</li>' +
+    '<li>Non mette mai a rischio piu\' di quanto resta della perdita massima. Se la perdita dall\'avvio la raggiunge, si ferma da solo e chiude tutto.</li>' +
+    '<li>Non tocca le posizioni che apri tu. Pero\' contano nei posti e nella perdita dall\'avvio.</li></ul></div>';
 }
 
 function robotStoriaHTML(){
   var s = storiaRobot(), r = s.r;
   if(!r.n) return '';
-  var rischioMedio = (S.cfg.budget || 0) * M.PROFILI.estremo.rischio * 0.75;
-  return '<div class="h2">Sulla storia<span class="r">' + r.n + ' colpi</span></div><div class="card">' +
+  var rischioMedio = M.rischioRobot(S.cfg.robotPerdita || 50, 'B');
+  return '<div class="h2">Sulla storia<span class="r">' + r.n + ' colpi · ' + M.STILI[S.cfg.stile].nome + '</span></div><div class="card">' +
     '<p style="margin:0 0 10px;font-size:14px;line-height:1.5">Le stesse regole del robot rigiocate sulla storia dei mercati della lista, con al massimo ' +
     (S.cfg.robotPosti || 10) + ' posizioni insieme: <b>' + fmt(r.pVince * 100, 0) + '%</b> in guadagno, <b>' + erre(r.rMedio) + '</b> a colpo, peggior serie <b>' +
-    fmt(-r.maxDD, 1) + 'R</b>' + (rischioMedio > 0 ? ' (circa ' + soldiS(-r.maxDD * rischioMedio) + ' col tuo budget)' : '') + '.</p>' +
+    fmt(-r.maxDD, 1) + 'R</b> (circa ' + soldiS(-r.maxDD * rischioMedio) + ' con il tuo tetto' +
+    (r.maxDD * rischioMedio > (S.cfg.robotPerdita || 50) ? ': il robot si sarebbe fermato prima, a ' + soldiS(-(S.cfg.robotPerdita || 50)) : '') + ').</p>' +
     graficoCurva('g-robot', s.colpi) +
     (S.modo === 'esempio' ? '<div class="nota warn"><b>Dati inventati:</b> questi numeri non valgono niente.</div>'
-                          : '<p class="piccolo" style="margin:8px 0 0">Storia, non promessa. Spread, notti e slittamento degli stop sono compresi; le notizie e i buchi del lunedi\' no.</p>') + '</div>';
+                          : '<p class="piccolo" style="margin:8px 0 0">Storia, non promessa. Spread, notti e slittamento degli stop sono compresi; le notizie e i buchi del lunedi\' no.' +
+                            (S.cfg.stile === 'rapido' ? ' Sui quarti d\'ora lo spread pesa di piu\': se qui il risultato a colpo e\' sotto zero, sul conto vero lo sara\' anche di piu\'.' : '') + '</p>') + '</div>';
+}
+
+/* Perche' non apre: l'ultima occhiata a ogni mercato, come la scrive il ponte */
+function vistiHTML(rb, adesso){
+  var v = rb.visti || {}, chiavi = Object.keys(v);
+  if(!chiavi.length) return '';
+  chiavi.sort(function(a, b){ return (v[b].quando || 0) - (v[a].quando || 0); });
+  return '<div class="h2">Cosa sta guardando<span class="r">' + chiavi.length + ' mercati</span></div><div class="card" style="padding:6px 14px">' +
+    '<table class="tab-d"><tr><th>Mercato</th><th>Punti</th><th>Perche\'</th></tr>' + chiavi.map(function(ep){
+      var x = v[ep], m = String(x.motivo || '');
+      var tono = m === 'aperta' ? 'pos' : /errore|rifiutato/i.test(m) ? 'neg' : '';
+      return '<tr><td class="t">' + esc(nomeDi(ep)) + '<div class="piccolo">' + durata(adesso - x.quando) + ' fa</div></td>' +
+        '<td>' + (x.punti != null ? M.segno(x.punti) : '—') + '</td><td class="' + tono + '" style="text-align:left;white-space:normal;font-size:12px;font-family:var(--sys)">' + esc(m === 'aperta' ? 'Aperta!' : m) + '</td></tr>';
+    }).join('') + '</table><p class="piccolo" style="margin:8px 0 6px">Entra da ' + M.sogliaProfilo('estremo') + ' punti in su (o in giu\', per vendere), quando il momento e\' giusto. ' +
+    'Il ponte salva queste righe ogni cinque minuti.</p></div>';
 }
 
 function tabRobot(){
@@ -1558,27 +1584,52 @@ function tabRobot(){
   }
   var R = S.robot;
   if(!R){ caricaRobot(); return h + '<div class="card"><div class="vuoto"><b>Chiedo al ponte…</b></div></div>'; }
-  if(R.vecchio){
-    return h + '<div class="nota warn"><b>Il ponte su Cloudflare e\' la versione vecchia</b> e non sa ancora fare il robot. Ricopialo: apri ' +
+  if(R.vecchio || (R.versione && parseFloat(R.versione) < 2.1)){
+    return h + '<div class="nota warn"><b>Il ponte su Cloudflare e\' la versione vecchia.</b> Ricopialo: apri ' +
       '<a href="https://github.com/w8997wnwy5-collab/capital_com/blob/claude/sleepy-ptolemy-xwmkf5/server/worker.js" target="_blank" rel="noopener">server/worker.js</a> › ' +
-      '<b>Copy raw file</b>; su Cloudflare, il tuo Worker › <b>Edit code</b> › cancella tutto, incolla › <b>Deploy</b>. Poi torna qui.</div>' + robotRegoleHTML();
+      '<b>Copy raw file</b>; su Cloudflare, il tuo Worker › <b>Edit code</b> › cancella tutto, incolla › <b>Deploy</b>. Poi torna qui.' +
+      (R.robot && R.robot.acceso ? ' Il robot vecchio e\' ancora acceso: dopo, premi <b>Ferma</b> e poi <b>Avvia</b>.' : '') + '</div>' + robotRegoleHTML();
   }
   if(R.errore) return h + '<div class="nota warn">' + esc(R.errore) + '</div><button class="btn" onclick="caricaRobot()">Riprova</button>';
   if(!R.memoria) return h + '<div class="nota warn">Al Worker manca il deposito <b>MEMORIA</b> (KV): senza, il robot non puo\' ricordare cosa ha aperto. ' +
     'Istruzioni nella guida del ponte.</div>';
 
-  var rb = R.robot || {}, acceso = !!rb.acceso, conto = R.conto || {}, val = conto.valuta || valutaConto();
-  var risultato = R.risultato, perdita = risultato != null ? Math.max(0, -risultato) : 0, tetto = rb.perditaMax || S.cfg.robotPerdita || 50;
+  var rb = R.robot || {}, cmd = R.comando, conto = R.conto || {}, val = conto.valuta || valutaConto();
+  var adesso = (R.ora || Date.now()) + (Date.now() - S.robotQuando);
+  var acceso = cmd ? cmd.azione === 'avvia' : !!rb.acceso;
+  var stile = (cmd && cmd.impostazioni && cmd.impostazioni.stile) || (rb.acceso && rb.stile) || S.cfg.stile;
+  if(!M.STILI[stile]) stile = 'swing';
+  var battito = rb.battito && rb.battito.quando ? adesso - rb.battito.quando : null;
+  var risultato = R.risultato, perdita = risultato != null ? Math.max(0, -risultato) : 0;
+  var tetto = (cmd && cmd.impostazioni && cmd.impostazioni.perditaMax) || rb.perditaMax || S.cfg.robotPerdita || 50;
   var quota = Math.min(1, perdita / tetto);
+
+  /* il cron gira? lo si capisce dal comando che resta in attesa o dal battito vecchio */
+  var cron = '<b>Settings › Triggers › Cron Triggers › Add</b>, scrivi <b>* * * * *</b>';
+  if(cmd && adesso - cmd.quando > 150000){
+    h += '<div class="nota warn"><b>Il robot non gira.</b> Hai premuto ' + (cmd.azione === 'avvia' ? 'Avvia' : 'Ferma') + ' ' + durata(adesso - cmd.quando) +
+      ' fa e il ponte non l\'ha ancora fatto: su Cloudflare manca l\'orologio. Nel tuo Worker: ' + cron + '. ' +
+      'Se c\'e\' gia\', apri <b>Logs</b>: se i giri finiscono in errore (per esempio <i>Exceeded CPU</i>), aggiungi la variabile <b>ROBOT_CALCOLI</b> = <b>2</b>.</div>';
+  } else if(cmd){
+    h += '<div class="nota acc">' + (cmd.azione === 'avvia' ? '<b>Si accende al prossimo giro</b>, entro un minuto o due. Su Telegram arriva <b>ROBOT ACCESO</b>: e\' la prova che l\'orologio di Cloudflare gira.'
+                                                         : '<b>Si ferma al prossimo giro</b>, entro un minuto o due.' + (cmd.chiudi ? ' Le posizioni che conosceva le ha gia\' chiuse.' : '')) + '</div>';
+  } else if(rb.acceso && (battito == null || battito > 15 * 60000)){
+    h += '<div class="nota warn"><b>Il robot non sta girando</b>' + (battito != null ? ': l\'ultimo giro e\' di ' + durata(battito) + ' fa' : '') + '. Nel tuo Worker su Cloudflare controlla l\'orologio (' + cron + ') e i <b>Logs</b>.</div>';
+  }
+
+  var titolo = cmd ? (cmd.azione === 'avvia' ? 'Si sta accendendo' : 'Si sta fermando') : (acceso ? 'Il robot e\' acceso' : 'Il robot e\' spento');
+  var sotto = cmd ? (cmd.azione === 'avvia' ? M.STILI[stile].nome + ', tetto ' + fmt(tetto, 0) + ' ' + esc(val) + '.' : 'Non apre piu\' niente.')
+    : acceso ? 'Da ' + durata(adesso - rb.avviato) + ' · ' + M.STILI[stile].nome + ' · ultimo giro ' + (battito != null ? durata(battito) + ' fa' : '—') + '. Lavora anche con l\'app chiusa.'
+    : rb.motivo === 'tetto' ? 'Si e\' fermato da solo: ha raggiunto la perdita massima.'
+    : rb.fermato ? 'Fermato ' + giornoOra(rb.fermato) + '.' : 'Non e\' mai stato acceso.';
+  var colpi = rb.colpi || { n: 0, vinti: 0 };
   h += '<div class="hero"><svg class="mirino" viewBox="0 0 100 100" aria-hidden="true">' + MIRINO_SVG + '</svg>' +
     '<div class="l">' + (R.demo ? 'Conto demo' : 'Conto reale') + ' · profilo Estremo</div>' +
-    '<div class="v">' + (acceso ? 'Il robot e\' acceso' : 'Il robot e\' spento') + '</div>' +
-    '<div class="s">' + (acceso ? 'Da ' + durata(Date.now() - rb.avviato) + '. Lavora anche con l\'app chiusa.'
-       : rb.motivo === 'tetto' ? 'Si e\' fermato da solo: ha raggiunto la perdita massima.'
-       : rb.fermato ? 'Fermato ' + giornoOra(rb.fermato) + '.' : 'Non e\' mai stato acceso.') + '</div>' +
-    (rb.capitaleIniziale != null ? '<div class="riga"><div>Dall\'avvio<b class="' + (risultato >= 0 ? '' : '') + '">' + (risultato != null ? soldiS(risultato, 2) : '—') + '</b></div>' +
-      '<div>Tetto<b>' + fmt(tetto, 0) + ' ' + esc(val) + '</b></div><div>Posizioni<b>' + (rb.aperte || []).length + ' / ' + (rb.maxPosizioni || 10) + '</b></div></div>' : '') + '</div>';
-  if(rb.capitaleIniziale != null){
+    '<div class="v">' + titolo + '</div><div class="s">' + sotto + '</div>' +
+    (rb.capitaleIniziale != null && !(cmd && cmd.azione === 'avvia') ? '<div class="riga"><div>Dall\'avvio<b>' + (risultato != null ? soldiS(risultato, 2) : '—') + '</b></div>' +
+      '<div>Posizioni<b>' + (rb.aperte || []).length + ' / ' + (rb.maxPosizioni || 10) + '</b></div>' +
+      '<div>Colpi<b>' + (colpi.n ? colpi.vinti + ' vinti su ' + colpi.n : '—') + '</b></div></div>' : '') + '</div>';
+  if(rb.capitaleIniziale != null && !(cmd && cmd.azione === 'avvia')){
     h += '<div class="card" style="padding:13px 15px"><div class="piccolo" style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Perdita dall\'avvio</span>' +
       '<span class="num">' + fmt(perdita, 2) + ' / ' + fmt(tetto, 0) + ' ' + esc(val) + '</span></div>' +
       '<div class="barra" style="min-width:0"><i class="c" style="right:auto;left:0;width:' + (quota * 100).toFixed(1) + '%;background:' + (quota > 0.7 ? 'var(--warn)' : 'var(--amber)') + '"></i></div></div>';
@@ -1588,31 +1639,36 @@ function tabRobot(){
     h += '<div class="fila"><button class="btn" onclick="fermaRobot(false)"' + (S.robotOccupato ? ' disabled' : '') + '>Ferma</button>' +
       '<button class="btn ko" onclick="fermaRobot(true)"' + (S.robotOccupato ? ' disabled' : '') + '>Ferma e chiudi tutto</button></div>' +
       '<p class="piccolo" style="margin:8px 3px 14px"><b>Ferma</b>: non apre piu\' niente, le posizioni aperte le porta a fine con le loro regole. <b>Ferma e chiudi tutto</b>: chiude subito. ' +
-      'Da Telegram: /stop e /chiudi.</p>';
+      'Da Telegram: /stop e /chiudi. Per cambiare stile: Ferma, poi Avvia con lo stile nuovo.</p>';
   } else {
-    var budget = S.cfg.budget || 0;
+    var t = S.cfg.robotPerdita || 50;
     h += '<div class="card"><div class="h2" style="margin:0 0 10px">Prima di accenderlo</div>' +
+      '<div class="seg" style="margin-bottom:6px">' + Object.keys(M.STILI).map(function(k){
+        return '<button class="' + (S.cfg.stile === k ? 'on' : '') + '" onclick="impostaStile(\'' + k + '\')">' + M.STILI[k].nome + '</button>';
+      }).join('') + '</div><p class="piccolo" style="margin:0 0 12px">' + fraseStile(S.cfg.stile) +
+      (S.cfg.stile !== 'rapido' ? ' Per entrare, incassare e uscire tante volte al giorno scegli <b>Rapido</b>.' : '') + '</p>' +
       '<div class="fila"><div class="campo" style="flex:1"><label for="rb-perdita">Perdita massima (' + esc(val) + ')</label>' +
-      '<input id="rb-perdita" type="number" inputmode="decimal" min="1" step="5" value="' + (S.cfg.robotPerdita || 50) + '" oninput="campoRobot(\'robotPerdita\', this.value)"></div>' +
+      '<input id="rb-perdita" type="number" inputmode="decimal" min="1" step="5" value="' + t + '" oninput="campoRobot(\'robotPerdita\', this.value)"></div>' +
       '<div class="campo" style="flex:1"><label for="rb-posti">Posizioni al massimo</label>' +
       '<input id="rb-posti" type="number" inputmode="numeric" min="1" max="10" step="1" value="' + (S.cfg.robotPosti || 10) + '" oninput="campoRobot(\'robotPosti\', this.value)"></div></div>' +
-      '<p class="piccolo" style="margin:0 0 12px">Budget <b class="num">' + fmt(budget, 0) + ' ' + esc(val) + '</b> (dal Colpo) · stile <b>' + M.STILI[S.cfg.stile].nome + '</b> · ' +
+      '<p class="piccolo" style="margin:0 0 12px">Rischio a colpo <b class="num">' + fmt(M.rischioRobot(t, 'A'), 2) + '</b> su un A, <b class="num">' + fmt(M.rischioRobot(t, 'C'), 2) + '</b> su un C · ' +
       S.cfg.lista.length + ' mercati · disponibili sul conto <b class="num">' + (conto.disponibile != null ? fmt(conto.disponibile, 2) : '—') + ' ' + esc(val) + '</b>. ' +
-      'Il tetto conta da quando premi Avvia.</p>' +
-      (budget > 0 ? '' : '<div class="nota warn">Metti un budget nella scheda Colpo.</div>') +
+      'Il tetto conta da quando premi Avvia. Le posizioni al massimo contano anche le tue.</p>' +
       (R.telegram ? '' : '<div class="nota amb">Telegram non e\' collegato: il robot lavora lo stesso, ma non ti scrive cosa fa e non puoi fermarlo da li\'.</div>') +
-      '<button class="btn acc" onclick="avviaRobot()"' + (S.robotOccupato || !(budget > 0) ? ' disabled' : '') + '>Avvia il robot</button></div>';
+      '<button class="btn acc" onclick="avviaRobot()"' + (S.robotOccupato ? ' disabled' : '') + '>Avvia il robot · ' + M.STILI[S.cfg.stile].nome + '</button></div>';
   }
 
   var aperte = rb.aperte || [];
   h += '<div class="h2">Le sue posizioni<span class="r">' + aperte.length + '</span></div>';
-  if(!aperte.length) h += '<div class="card"><div class="vuoto" style="padding:14px">' + (acceso ? 'Nessuna, per ora: aspetta un segnale buono.' : 'Nessuna.') + '</div></div>';
+  if(!aperte.length) h += '<div class="card"><div class="vuoto" style="padding:14px">' + (acceso ? 'Nessuna, per ora: qui sotto vedi perche\'.' : 'Nessuna.') + '</div></div>';
   else h += '<div class="card" style="padding:6px 14px"><table class="tab-d"><tr><th>Mercato</th><th>Entrata</th><th>Stop</th><th>Ora</th></tr>' + aperte.map(function(a){
     var r = a.prezzo != null && a.R > 0 ? (a.prezzo - a.entrata) * a.dir / a.R : null;
     return '<tr><td class="t">' + freccia(a.dir) + ' ' + esc(a.nome || a.epic) + '<div class="piccolo">' + fmt(a.dim, a.dim % 1 ? 2 : 0) + ' · ' + giornoOra(a.aperta) + '</div></td>' +
       '<td>' + prezzo(a.entrata) + '</td><td>' + prezzo(a.stop != null ? a.stop : a.stopIniziale) + '</td>' +
       '<td class="' + (r == null ? '' : r >= 0 ? 'pos' : 'neg') + '">' + (r != null ? erre(r) : '—') + '</td></tr>';
   }).join('') + '</table></div>';
+
+  if(acceso || rb.acceso) h += vistiHTML(rb, adesso);
 
   var diario = rb.diario || [];
   if(diario.length){
@@ -1622,7 +1678,7 @@ function tabRobot(){
         '</span><br><span class="' + tono + '">' + esc(d.testo) + '</span></div>';
     }).join('') + '</div>';
   }
-  h += robotRegoleHTML() + robotStoriaHTML();
+  h += robotRegoleHTML(acceso ? stile : S.cfg.stile) + robotStoriaHTML();
   h += '<p class="piccolo" style="margin:14px 3px 0">Il robot puo\' perdere tutta la perdita massima, e in fretta: con la leva un periodo storto arriva prima di quanto sembri. ' +
     'Il tetto lo ferma li\'; i buchi di prezzo (notizie, aperture del lunedi\') possono superarlo di poco.</p>';
   return h;
@@ -1636,15 +1692,16 @@ function campoRobot(k, v){
 
 function avviaRobot(){
   var R = S.robot || {}, val = (R.conto && R.conto.valuta) || valutaConto();
-  var perdita = S.cfg.robotPerdita || 50, posti = S.cfg.robotPosti || 10;
+  var perdita = S.cfg.robotPerdita || 50, posti = S.cfg.robotPosti || 10, st = M.STILI[S.cfg.stile];
   var conto = R.demo ? 'DEMO' : 'REALE';
-  if(!confirm('Il robot aprira\' e chiudera\' posizioni da solo sul conto ' + conto + ', profilo Estremo, fino a ' + posti + ' posizioni.\n\n' +
-              'Si ferma da solo e chiude tutto se perde ' + fmt(perdita, 0) + ' ' + val + ' da adesso.\n\nAvvio?')) return;
+  if(!confirm('Il robot aprira\' e chiudera\' posizioni da solo sul conto ' + conto + ', profilo Estremo, stile ' + st.nome + ', fino a ' + posti + ' posizioni.\n\n' +
+              'Rischia fino a ' + fmt(M.rischioRobot(perdita, 'A'), 2) + ' ' + val + ' a colpo. Si ferma da solo e chiude tutto se perde ' + fmt(perdita, 0) + ' ' + val + ' da adesso.\n\nAvvio?')) return;
   S.robotOccupato = true; render();
-  chiediPonte('/api/robot/avvia', { metodo: 'POST', corpo: { budget: S.cfg.budget, perditaMax: perdita, maxPosizioni: posti, stile: S.cfg.stile,
+  chiediPonte('/api/robot/avvia', { metodo: 'POST', corpo: { perditaMax: perdita, maxPosizioni: posti, stile: S.cfg.stile,
                                                              lista: S.cfg.lista, riferimento: S.cfg.riferimento } })
     .then(function(d){
-      mostraAvviso('Robot acceso', 'Tetto ' + fmt(perdita, 0) + ' ' + val + '. ' + (d.webhook ? 'Su Telegram: /stato /stop /chiudi.' : 'Fermalo da qui.'));
+      mostraAvviso('Robot in partenza', 'Si accende al prossimo giro, entro un minuto o due. ' + (d.webhook ? 'Su Telegram arriva ROBOT ACCESO; da li\': /stato /stop /chiudi.' : 'Fermalo da qui.') +
+        ' Se fra due minuti qui c\'e\' ancora "Si sta accendendo", su Cloudflare manca l\'orologio (Cron Trigger).');
     }, function(e){ mostraAvviso('Non si accende', e.message); })
     .then(function(){ S.robotOccupato = false; return caricaRobot(); });
 }
@@ -1655,8 +1712,9 @@ function fermaRobot(chiudi){
   chiediPonte('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: !!chiudi } })
     .then(function(d){
       var male = (d.esiti || []).filter(function(e){ return !e.ok; }).length;
-      mostraAvviso('Robot fermato', chiudi ? 'Chiuse ' + (d.esiti || []).filter(function(e){ return e.ok; }).length + ' posizioni' + (male ? ', ' + male + ' NON chiuse: controlla su Capital.com.' : '.')
-                                           : 'Non apre piu\' niente; le posizioni aperte le porta a fine.');
+      mostraAvviso('Robot fermato', chiudi ? 'Chiuse ' + (d.esiti || []).filter(function(e){ return e.ok; }).length + ' posizioni' + (male ? ', ' + male + ' NON chiuse: riprova al prossimo giro, controlla su Capital.com.' : '.') +
+                                             ' Al prossimo giro richiude quello che fosse partito nel frattempo.'
+                                           : 'Non apre piu\' niente da adesso; le posizioni aperte le porta a fine.');
     }, function(e){ mostraAvviso('Non si ferma', e.message + ' Usa /stop su Telegram o chiudi da Capital.com.'); })
     .then(function(){ S.robotOccupato = false; return caricaRobot(); });
 }
@@ -1715,8 +1773,8 @@ function tabPrecisione(){
     '<li>Il segnale si legge sulla candela chiusa, si entra all\'apertura della successiva. Nessun indicatore guarda avanti: lo verifica un test.</li>' +
     '<li>Si paga lo spread vero di ogni candela di Capital.com: si compra all\'ask, si vende al bid.</li>' +
     '<li>Se in una candela si toccano sia lo stop sia l\'obiettivo, si assume lo stop. Se il mercato apre oltre lo stop, si esce all\'apertura, non allo stop. ' +
-      'E ogni stop preso dentro la candela esce un po\' peggio del livello (' + M.REGOLE.slittamentoAtr + ' ATR): uno stop e\' un ordine a mercato.</li>' +
-    '<li>Le notti si pagano: ' + (S.cfg.stile === 'swing' ? 'il tasso di Capital.com, o una stima prudente se non lo manda.' : 'in intraday non ce ne sono, si chiude a fine giornata.') + '</li>' +
+      'E ogni stop preso dentro la candela esce un po\' peggio del livello (' + M.regoleDi(S.cfg.stile).slittamentoAtr + ' ATR): uno stop e\' un ordine a mercato.</li>' +
+    '<li>Le notti si pagano: ' + (S.cfg.stile === 'swing' ? 'il tasso di Capital.com, o una stima prudente se non lo manda.' : 'qui non ce ne sono, si chiude a fine giornata.') + '</li>' +
     '<li>I pesi del punteggio non sono stati ottimizzati su questi dati, apposta: un punteggio tarato sul passato vince sempre sul passato.</li>' +
     '<li>R e\' il rischio del colpo: +1R vuol dire aver guadagnato quanto si rischiava.</li></ul></div>';
   h += '<div class="h2">Cosa il motore non sa</div><div class="card"><ul class="elenco" style="margin:0">' +
@@ -1777,12 +1835,13 @@ function tabPonte(){
     ['US500', 'US100', 'US30', 'DE40', 'IT40', 'UK100'].map(function(e){ return '<option' + (c.riferimento === e ? ' selected' : '') + '>' + e + '</option>'; }).join('') + '</select></div>' +
     '<button class="btn" onclick="ripristinaLista()">Torna alla lista di partenza</button></div>';
 
-  h += '<div class="h2">Regole</div><div class="card"><ul class="elenco" style="margin:0">' +
-    '<li>Stop iniziale a ' + M.REGOLE.stopAtr + ' ATR. R = la distanza fra entrata e stop.</li>' +
-    '<li>A +' + M.REGOLE.pareggioDa + 'R lo stop va a pareggio. A +' + M.REGOLE.tp1 + 'R si chiude meta\'. A +' + M.REGOLE.tp2 + 'R il resto.</li>' +
-    '<li>Dopo il primo incasso lo stop insegue il prezzo a ' + M.REGOLE.trailAtr + ' ATR dal massimo.</li>' +
+  var Rg = M.regoleDi(S.cfg.stile), St = M.STILI[S.cfg.stile];
+  h += '<div class="h2">Regole<span class="r">' + St.nome + '</span></div><div class="card"><ul class="elenco" style="margin:0">' +
+    '<li>Stop iniziale a ' + Rg.stopAtr + ' ATR. R = la distanza fra entrata e stop.</li>' +
+    '<li>A +' + Rg.pareggioDa + 'R lo stop va a pareggio. A +' + Rg.tp1 + 'R si chiude meta\'. A +' + Rg.tp2 + 'R il resto.</li>' +
+    '<li>Dopo il primo incasso lo stop insegue il prezzo a ' + Rg.trailAtr + ' ATR dal massimo.</li>' +
     '<li>Se il segnale si gira contro (grado C dall\'altra parte) si esce, anche in guadagno.</li>' +
-    '<li>Tempo massimo: ' + M.STILI.swing.maxBarre + ' giorni in swing, ' + M.STILI.intraday.maxBarre + ' ore in intraday.</li></ul></div>';
+    '<li>Tempo massimo: ' + M.STILI.swing.maxBarre + ' giorni in swing, ' + M.STILI.intraday.maxBarre + ' ore in intraday, ' + M.STILI.rapido.maxBarre / 4 + ' ore in rapido.</li></ul></div>';
 
   h += '<div class="h2">Questo telefono</div><div class="card"><p class="piccolo" style="margin:0 0 10px">Mirino ' + VERSIONE + '. Budget, lista, posizioni a mano e libro ' +
     'stanno solo qui, nel browser. Le chiavi di Capital.com no: stanno nel ponte.</p><button class="btn ko" onclick="cancellaTutto()">Cancella i dati di questo telefono</button></div>';
