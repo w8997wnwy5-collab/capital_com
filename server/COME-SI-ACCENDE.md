@@ -158,6 +158,26 @@ Stop 181.50 · obiettivi 195.20 / 207.80
 Un avviso per cambio, non uno al minuto: il ponte si ricorda l'ultimo che ti ha
 mandato. A mercato chiuso tace.
 
+**E gli ingressi.** Nello stesso giro il ponte guarda **un mercato della lista**,
+a rotazione: con 18 mercati ognuno viene controllato circa ogni 18 minuti. Tutti
+insieme ogni minuto non ci starebbero nei 10 ms di calcolo del piano gratuito, e
+per chi gioca sulle giornaliere un quarto d'ora non cambia niente. Quando uno
+diventa pronto per il tuo profilo ti scrive l'ordine, calcolato come nell'app:
+
+```
+ENTRA · Tesla lungo · grado A (+55)
+Compra 6 a mercato, circa 436.97.
+Stop 399.06 · obiettivi 493.85 / 569.68
+Rischio 182 CHF · margine 419 CHF (leva 5:1)
+Spinge e non e' ancora tirato: il momento e' adesso.
+```
+
+Il link in fondo apre il piano di quel mercato nell'app. Non ti scrive se il
+mercato è chiuso, se sei già dentro, se hai già tutti i colpi del profilo aperti,
+se te l'ha già detto nelle ultime 12 ore (3 in intraday) o se il budget non
+arriva alla taglia minima. Budget, profilo e lista li prende dall'app: aprila
+collegata almeno una volta. Si spengono da **Ponte › Solo uscite**.
+
 ---
 
 ## I conti (piano gratuito)
@@ -165,8 +185,8 @@ mandato. A mercato chiuso tace.
 | | limite gratuito | Mirino ne usa |
 |---|---|---|
 | richieste al Worker | 100'000 al giorno | ~1'500 (un giro al minuto + l'app) |
-| tempo di calcolo | 10 ms a richiesta | 2–5 ms a posizione per il consiglio |
-| scritture KV | 1'000 al giorno | una manciata: solo quando un consiglio cambia |
+| tempo di calcolo | 10 ms a richiesta | 1–2 ms a posizione, più un mercato della lista a giro |
+| scritture KV | 1'000 al giorno | una manciata: solo quando un consiglio cambia o arriva un avviso d'ingresso |
 | domande a Capital.com | 10 al secondo | 3 alla volta dall'app, le candele restano in memoria |
 
 ## Se qualcosa non va

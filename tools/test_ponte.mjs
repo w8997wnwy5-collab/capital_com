@@ -16,6 +16,7 @@ const path = require('path');
 const fs = require('fs');
 const E = require(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'esempio.js'));
 const cuci = require(path.join(path.dirname(new URL(import.meta.url).pathname), 'cuci_worker.js'));
+const Mot = require(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'motore.js'));
 
 const esiti = [];
 function prova(nome, ok, dettaglio) { esiti.push([nome, !!ok, dettaglio == null ? '' : String(dettaglio)]); }
@@ -168,6 +169,63 @@ prova('e smette quando glielo dici', r.stato === 200 && JSON.parse(kvm.get('manu
 
 r = await chiedi('/api/telegram/prova', { metodo: 'POST' });
 prova('il messaggio di prova parte', r.stato === 200 && telegrammi.some(t => /Gli avvisi arrivano qui/.test(t.text)));
+
+/* ── gli avvisi d'ingresso ── */
+const FISSO = Date.UTC(2026, 9, 7, 16, 0);          /* l'ora dei dati finti: mercoledi', Wall Street aperta */
+const AZIONI = E.UNIVERSO.filter(u => u[2] === 'SHARES').map(u => u[0]);
+r = await chiedi('/api/impostazioni', { metodo: 'POST', corpo: { lista: AZIONI.concat(['DE40', 'non valido!']), profilo: 'aggressivo',
+  stile: 'swing', budget: 5000, riferimento: 'US500', valuta: 'CHF', ingressi: true } });
+prova('l\'app manda le impostazioni al ponte (e quelle strane si scartano)', r.stato === 200 && r.d.impostazioni.lista.length === AZIONI.length + 1 &&
+      r.d.impostazioni.budget === 5000, JSON.stringify(r.d.impostazioni && r.d.impostazioni.lista.slice(-2)));
+r = await chiedi('/api/impostazioni');
+prova('e le rilegge', r.stato === 200 && r.d.impostazioni && r.d.impostazioni.profilo === 'aggressivo');
+
+/* quello che direbbe l'app, rifatto qui col motore: stesse 400 candele,
+   stesso riferimento, stessa folla, stessa leva e stesso cambio */
+const Sw = Mot.STILI.swing;
+const candeleFinte = (ep, res, n) => Mot.candele(E.risposta('prices/' + ep, { resolution: res, max: n }, FISSO));
+const rifVivo = Mot.indicatori(candeleFinte('US500', 'DAY', Sw.candeleVive));
+const folla = Object.fromEntries(E.risposta('clientsentiment', { marketIds: AZIONI.join(',') }, FISSO).clientSentiments.map(x => [x.marketId, x.longPositionPercentage]));
+const leve = E.risposta('accounts/preferences', {}, FISSO).leverages;
+const usdchf = (s => (s.bid + s.offer) / 2)(E.risposta('markets/USDCHF', {}, FISSO).snapshot);
+const attesi = {};
+for (const ep of AZIONI) {
+  const d = E.risposta('markets/' + ep, {}, FISSO);
+  if (d.snapshot.marketStatus !== 'TRADEABLE') continue;
+  const an = Mot.analizza(candeleFinte(ep, 'DAY', Sw.candeleVive), candeleFinte(ep, 'HOUR', Sw.candeleTempo),
+                          { rif: rifVivo, percLunghi: folla[ep], prezzo: { bid: d.snapshot.bid, ask: d.snapshot.offer } });
+  if (!Mot.pronto(an, 'aggressivo') || ep === 'NVDA') continue;
+  const strumento = Mot.strumentoDa(d, leve);
+  attesi[ep] = Mot.piano({ an, budget: 5000, profilo: 'aggressivo', stile: 'swing', strumento,
+                           cambio: strumento.valuta === 'CHF' ? 1 : usdchf, notte: Mot.notteDa(d.instrument.overnightFee) });
+}
+const n = AZIONI.length + 1, base = Math.floor(FISSO / 60000 / n) * n * 60000;
+async function giro(da) {
+  telegrammi.length = 0;
+  for (let i = 0; i < n; i++) await ponte.scheduled({ scheduledTime: base + (da + i) * 60000 }, ENV, { waitUntil() {} });
+  await new Promise(ok => setTimeout(ok, 50));
+  return telegrammi.filter(t => /^<b>ENTRA/.test(t.text));
+}
+let entra = await giro(0);
+const avvisati = entra.map(t => (AZIONI.find(ep => t.text.includes('#colpo/' + ep)) || '?'));
+prova('un giro della lista: avvisa esattamente i mercati pronti per il profilo', Object.keys(attesi).length > 0 &&
+      avvisati.slice().sort().join() === Object.keys(attesi).sort().join(), 'attesi ' + Object.keys(attesi).join(',') + ' · avvisati ' + avvisati.join(','));
+prova('non avvisa l\'ingresso dove sei gia\' dentro (NVDA)', !avvisati.includes('NVDA'));
+prova('e non avvisa i mercati chiusi (DE40 alle 16 UTC)', !entra.some(t => t.text.includes('#colpo/DE40')));
+const uno = avvisati[0], pu = attesi[uno], testo = entra[0] && entra[0].text;
+prova('l\'ordine nel messaggio e\' quello dell\'app: stessa taglia, stesso stop', !!testo && testo.includes(' ' + Mot.fmtNum(pu.dim, pu.passo < 1 ? 2 : 0) + ' ') &&
+      testo.includes('Stop ' + Mot.fmtPrezzo(pu.stop)), testo && testo.split('\n').slice(0, 3).join(' | '));
+const scrittePrimaGiro = ENV.MEMORIA.scritture;
+entra = await giro(n);
+prova('il giro dopo, stessi segnali: nessun secondo avviso, nessuna scrittura', entra.length === 0 && ENV.MEMORIA.scritture === scrittePrimaGiro,
+      entra.length + ' avvisi, ' + (ENV.MEMORIA.scritture - scrittePrimaGiro) + ' scritture');
+for (const k of [...kvm.keys()]) if (k.startsWith('ingresso:')) kvm.delete(k);
+await chiedi('/api/impostazioni', { metodo: 'POST', corpo: { lista: AZIONI, profilo: 'aggressivo', stile: 'swing', budget: 5000, valuta: 'CHF', ingressi: false } });
+entra = await giro(2 * n);
+prova('con "solo uscite" nessun avviso d\'ingresso', entra.length === 0, entra.length);
+await chiedi('/api/impostazioni', { metodo: 'POST', corpo: { lista: AZIONI, profilo: 'aggressivo', stile: 'swing', budget: 1, valuta: 'CHF', ingressi: true } });
+entra = await giro(3 * n);
+prova('con un budget sotto la taglia minima nessun avviso', entra.length === 0, entra.length);
 
 /* ── il freno sui codici ── */
 for (let i = 0; i < 12; i++) await chiedi('/api/stato', { chiave: 'x' + i, ip: '9.9.9.9' });

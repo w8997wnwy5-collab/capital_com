@@ -392,10 +392,16 @@ function punteggio(ser, t, extra) {
    lo SWING legge le candele giornaliere e cerca il momento sulle orarie, e
    tiene da qualche giorno a tre settimane; l'INTRADAY legge le orarie, cerca
    il momento sui quarti d'ora e chiude prima di sera, cosi' non paga notti. */
+/* candele: quante se ne chiedono per il backtest. candeleVive: quante ne
+   usa il segnale di ADESSO, nell'app e nel ponte. Devono essere le stesse
+   in tutti e due: le medie lunghe partono da un seme, e una storia di 1000
+   candele e una di 400 possono dare punteggi diversi di qualche punto.
+   Quattrocento bastano per la media a 200 e costano al ponte un terzo del
+   calcolo: su Cloudflare gratis ogni giro ha dieci millisecondi. */
 var STILI = {
-  swing:    { nome: 'Swing', segnale: 'DAY', tempo: 'HOUR', candele: 1000, candeleTempo: 300,
+  swing:    { nome: 'Swing', segnale: 'DAY', tempo: 'HOUR', candele: 1000, candeleVive: 400, candeleTempo: 300,
               barMs: 86400000, maxBarre: 20, orizzonte: 5, unita: 'giorni' },
-  intraday: { nome: 'Intraday', segnale: 'HOUR', tempo: 'MINUTE_15', candele: 1000, candeleTempo: 300,
+  intraday: { nome: 'Intraday', segnale: 'HOUR', tempo: 'MINUTE_15', candele: 1000, candeleVive: 400, candeleTempo: 300,
               barMs: 3600000, maxBarre: 7, orizzonte: 6, unita: 'ore', chiudiASera: true }
 };
 
@@ -429,6 +435,43 @@ var PESO_GRADO = { A: 1, B: 0.75, C: 0.5 };
    questo: circa il riferimento USA piu' 2.5% l'anno, diviso 360, sul valore
    intero della posizione (non sul margine: e' li' che la leva morde). */
 var NOTTE_PREDEFINITA = { lungo: 0.00018, corto: 0.00004 };
+
+/* Il profilo giocherebbe questo segnale? Una riga, ma la usano il radar
+   dell'app e gli avvisi d'ingresso del ponte: deve essere la stessa. */
+function pronto(an, profilo) {
+  var prof = PROFILI[profilo];
+  return !!(an && an.ok && an.grado && prof && prof.gradi.indexOf(an.grado) >= 0);
+}
+function sogliaProfilo(profilo) {
+  var g = (PROFILI[profilo] || PROFILI.aggressivo).gradi;
+  return g.indexOf('C') >= 0 ? 28 : g.indexOf('B') >= 0 ? 40 : 55;
+}
+
+/* Da un mercato di Capital.com (/markets/{epic} o una voce di marketDetails)
+   allo strumento che serve al piano. Anche questa e' condivisa: il piano
+   dell'app e quello dell'avviso su Telegram devono dare la stessa taglia. */
+function strumentoDa(d, leve) {
+  d = d || {};
+  var ins = d.instrument || {}, dr = d.dealingRules || {};
+  var lv = leve && ins.type && leve[ins.type] ? leve[ins.type] : null;
+  var dist = dr.minNormalStopOrLimitDistance;
+  return {
+    valuta: ins.currency, tipo: ins.type,
+    fattoreMargine: ins.marginFactorUnit === 'PERCENTAGE' ? ins.marginFactor : null,
+    leva: lv ? lv.current : null, leve: lv ? lv.available : null,
+    dimMin: dr.minDealSize ? dr.minDealSize.value : null,
+    passo: dr.minSizeIncrement ? dr.minSizeIncrement.value : null,
+    distMinStopPerc: dist && dist.unit === 'PERCENTAGE' ? dist.value : null
+  };
+}
+
+/* Capital.com da' il costo della notte in percento (negativo = paghi). Se
+   arriva un numero grande e' un tasso annuo: si divide per 360. */
+function notteDa(of) {
+  if (!of || typeof of.longRate !== 'number') return null;
+  var conv = function (r) { var d = Math.abs(r) > 0.2 ? r / 360 : r; return -d / 100; };
+  return { lungo: conv(of.longRate), corto: conv(typeof of.shortRate === 'number' ? of.shortRate : of.longRate) };
+}
 
 /* ─────────────────────────── orari di mercato ─────────────────────────── */
 
@@ -1064,6 +1107,7 @@ var API = {
   volatilita: volatilita, veroRange: veroRange,
   parti: parti, punteggio: punteggio, gradoDi: gradoDi, letturaFolla: letturaFolla,
   analizza: analizza, tempismo: tempismo, piano: piano, ripartisci: ripartisci, consiglio: consiglio,
+  pronto: pronto, sogliaProfilo: sogliaProfilo, strumentoDa: strumentoDa, notteDa: notteDa,
   backtest: backtest, riassumi: riassumi, calibra: calibra, portafoglio: portafoglio,
   derive: derive, calibraDerive: calibraDerive, previsione: previsione,
   orari: orari, barraMs: barraMs, giuAlPasso: giuAlPasso, rischioIniziale: rischioIniziale,
@@ -1099,13 +1143,17 @@ const Motore = globalThis.Motore;
 
      GLI AVVISI. Ogni minuto il ponte guarda le posizioni aperte e chiede al
      motore lo stesso consiglio che vedi sul telefono. Quando cambia (esci,
-     prendi meta', sposta lo stop...) ti scrive su Telegram. Il motore e'
+     prendi meta', sposta lo stop...) ti scrive su Telegram. Nello stesso
+     giro guarda un mercato della lista, a rotazione, e se e' pronto per il
+     tuo profilo ti scrive l'ordine da fare. Il motore e'
      lo stesso file dell'app, cucito qui sopra da tools/cuci_worker.js:
      telefono e ponte non possono dare consigli diversi.
 
    Endpoint (tutti con  Authorization: Bearer <CHIAVE>):
      GET  /api/stato               il ponte e' acceso? demo o reale? avvisi?
      GET  /api/cap/<percorso>      un percorso di Capital.com, in lettura
+     GET  /api/impostazioni        budget, profilo e lista per gli avvisi d'ingresso
+     POST /api/impostazioni        li manda l'app quando cambiano
      GET  /api/segui               le posizioni che il ponte sorveglia
      POST /api/segui               come sorvegliarne una (stile, rischio, ...)
      DELETE /api/segui/<id>        smetti di sorvegliarla
@@ -1331,12 +1379,15 @@ function html(s) { return String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '
 
 /* ─────────────────────────── la sorveglianza ───────────────────────────
 
-   Nella memoria lunga (KV, MEMORIA) ci stanno due cose per posizione:
-     segui:<id>    come va letta: stile, R iniziale, se hai gia' preso meta'.
-                   La scrive l'app quando premi "Sono entrato" o cambi
-                   qualcosa; se non c'e', la scrive il ponte la prima volta
-                   che vede la posizione, cosi' l'R non cambia piu'.
-     avviso:<id>   l'ultimo consiglio mandato, per non ripeterlo ogni minuto.
+   Nella memoria lunga (KV, MEMORIA) ci stanno:
+     segui:<id>     come va letta una posizione: stile, R iniziale, se hai
+                    gia' preso meta'. La scrive l'app quando premi "Sono
+                    entrato" o cambi qualcosa; se non c'e', la scrive il ponte
+                    la prima volta che vede la posizione, cosi' l'R non cambia.
+     avviso:<id>    l'ultimo consiglio mandato, per non ripeterlo ogni minuto.
+     impostazioni   budget, profilo, stile e lista, mandati dall'app: servono
+                    agli avvisi d'ingresso.
+     ingresso:<epic> l'ultimo avviso d'ingresso su quel mercato.
 
    Si scrive solo quando qualcosa cambia: il piano gratuito di KV concede
    mille scritture al giorno, e qui se ne fanno una manciata. */
@@ -1363,29 +1414,59 @@ function daCapital(p) {
   };
 }
 
+/* Le candele lette restano agganciate alla risposta da cui vengono: finche'
+   la risposta e' in memoria (dieci minuti per le giornaliere) non si
+   ricalcolano. Il tempo di calcolo e' la risorsa scarsa del piano gratuito. */
+const candeleGia = new WeakMap(), indicatoriGia = new WeakMap();
 async function candeleDi(env, epic, risoluzione, quante) {
-  return Motore.candele(await leggi(env, 'prices/' + epic, new URLSearchParams({ resolution: risoluzione, max: String(quante) })));
+  const r = await leggi(env, 'prices/' + epic, new URLSearchParams({ resolution: risoluzione, max: String(quante) }));
+  if (!candeleGia.has(r)) candeleGia.set(r, Motore.candele(r));
+  return candeleGia.get(r);
+}
+/* il riferimento (l'S&P 500) con i suoi indicatori, una volta per giro */
+async function riferimentoDi(env, ctx, rifEpic, S) {
+  const chiave = rifEpic + '|' + S.segnale;
+  if (!ctx.rif[chiave]) {
+    const cs = await candeleDi(env, rifEpic, S.segnale, S.candeleVive);
+    if (!indicatoriGia.has(cs)) indicatoriGia.set(cs, Motore.indicatori(cs));
+    ctx.rif[chiave] = indicatoriGia.get(cs);
+  }
+  return ctx.rif[chiave];
+}
+async function follaDi(env, ctx, epics) {
+  const mancano = epics.filter(e => !(e in ctx.folle));
+  if (mancano.length) {
+    try {
+      const s = await leggi(env, 'clientsentiment', new URLSearchParams({ marketIds: mancano.join(',') }));
+      for (const x of s.clientSentiments || []) ctx.folle[x.marketId] = x.longPositionPercentage;
+    } catch (e) { /* senza folla il punteggio si fa lo stesso */ }
+    for (const e of mancano) if (!(e in ctx.folle)) ctx.folle[e] = null;
+  }
+  return ctx.folle;
 }
 
-/* Il consiglio per una posizione, esattamente come lo calcola l'app. */
-async function consiglioPer(env, pos, imp, rif, folle) {
+/* Il consiglio per una posizione, esattamente come lo calcola l'app: stesse
+   candele (le ultime candeleVive), stesso riferimento, stessa folla. */
+async function consiglioPer(env, ctx, pos, imp, rifEpic, ora) {
   const M = Motore;
   const stile = M.STILI[imp.stile] ? imp.stile : 'swing';
   const S = M.STILI[stile];
-  const cs = await candeleDi(env, pos.epic, S.segnale, S.candele);
+  const cs = await candeleDi(env, pos.epic, S.segnale, S.candeleVive);
   const ct = await candeleDi(env, pos.epic, S.tempo, S.candeleTempo);
+  const rif = pos.epic === rifEpic ? null : await riferimentoDi(env, ctx, rifEpic, S);
+  const folle = await follaDi(env, ctx, [pos.epic]);
   const prezzo = { bid: pos.bid, ask: pos.ask };
-  const an = M.analizza(cs, ct, { rif: pos.epic === (imp.riferimento || 'US500') ? null : rif, percLunghi: folle[pos.epic], prezzo });
+  const an = M.analizza(cs, ct, { rif, percLunghi: folle[pos.epic], prezzo });
   if (!an.ok) return null;
   let orario = null;
   if (S.chiudiASera) {
     const d = await leggi(env, 'markets/' + pos.epic, new URLSearchParams());
-    orario = M.orari(d.instrument && d.instrument.openingHours, Date.now());
+    orario = M.orari(d.instrument && d.instrument.openingHours, ora);
   }
   return M.consiglio({
     pos: { ...pos, R: imp.R, stopIniziale: imp.stopIniziale, parziale: !!imp.parziale, rinforzata: !!imp.rinforzata,
            puntiEntrata: imp.puntiEntrata, passo: imp.passo },
-    prezzo, ct, an, stile, ora: Date.now(), orari: orario,
+    prezzo, ct, an, stile, ora, orari: orario,
   });
 }
 
@@ -1407,8 +1488,8 @@ function messaggio(env, pos, c) {
 
 const DA_AVVISARE = { esci: 1, incassa: 1, meta: 1, stop: 1, rinforza: 1, attento: 1 };
 
-async function sorveglia(env) {
-  if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_CHAT || !env.MEMORIA) return { saltato: 'avvisi spenti' };
+/* le posizioni aperte: quelle su Capital.com e quelle segnate a mano */
+async function posizioniAperte(env) {
   const lista = ((await leggi(env, 'positions', new URLSearchParams())).positions || []).map(daCapital);
   const manuali = (await leggiKV(env, 'manuali')) || [];
   for (const m of manuali) {
@@ -1416,46 +1497,36 @@ async function sorveglia(env) {
     try {
       const d = await leggi(env, 'markets/' + m.epic, new URLSearchParams());
       lista.push({ ...m, bid: d.snapshot.bid, ask: d.snapshot.offer, stato: d.snapshot.marketStatus });
-    } catch (e) { /* un mercato che non risponde non ferma gli altri */ }
+    } catch (e) { lista.push({ ...m, stato: 'SCONOSCIUTO' }); }
   }
-  if (!lista.length) return { posizioni: 0 };
+  return lista;
+}
 
+async function sorvegliaUscite(env, ctx, lista, imp, rifEpic, ora) {
   const aperte = lista.filter(p => p.stato === 'TRADEABLE');
-  if (!aperte.length) return { posizioni: lista.length, aperte: 0 };
-
-  const rifEpic = env.RIFERIMENTO || 'US500';
-  const epics = [...new Set(aperte.map(p => p.epic))];
-  let folle = {};
-  try {
-    const s = await leggi(env, 'clientsentiment', new URLSearchParams({ marketIds: epics.join(',') }));
-    for (const x of s.clientSentiments || []) folle[x.marketId] = x.longPositionPercentage;
-  } catch (e) { folle = {}; }
-
-  const rifPer = {};
   const mandati = [];
   for (const pos of aperte) {
     try {
-      let imp = await leggiKV(env, 'segui:' + pos.id);
-      if (!imp) {
+      let seg = await leggiKV(env, 'segui:' + pos.id);
+      if (!seg) {
         /* la prima volta: si fissa il rischio iniziale, che da qui non cambia */
-        imp = { stile: env.STILE || 'swing', riferimento: rifEpic };
-        if (pos.stop != null && (pos.stop - pos.entrata) * pos.dir < 0) imp.stopIniziale = pos.stop;
-        await scriviKV(env, 'segui:' + pos.id, imp);
+        seg = { stile: imp.stile || env.STILE || 'swing', riferimento: rifEpic };
+        if (pos.stop != null && (pos.stop - pos.entrata) * pos.dir < 0) seg.stopIniziale = pos.stop;
+        await scriviKV(env, 'segui:' + pos.id, seg);
       }
-      const S = Motore.STILI[imp.stile] || Motore.STILI.swing;
-      if (!rifPer[S.segnale]) rifPer[S.segnale] = Motore.indicatori(await candeleDi(env, rifEpic, S.segnale, S.candele));
-      if (!imp.R && !imp.stopIniziale) {
-        const cs = await candeleDi(env, pos.epic, S.segnale, S.candele);
+      const S = Motore.STILI[seg.stile] || Motore.STILI.swing;
+      if (!seg.R && seg.stopIniziale == null) {
+        const cs = await candeleDi(env, pos.epic, S.segnale, S.candeleVive);
         const R = Motore.rischioIniziale(cs, Motore.indicatori(cs), pos.aperta);
-        if (R) { imp.R = R; await scriviKV(env, 'segui:' + pos.id, imp); }
+        if (R) { seg.R = R; await scriviKV(env, 'segui:' + pos.id, seg); }
       }
-      const c = await consiglioPer(env, pos, imp, rifPer[S.segnale], folle);
+      const c = await consiglioPer(env, ctx, pos, seg, rifEpic, ora);
       if (!c) continue;
       const prima = await leggiKV(env, 'avviso:' + pos.id);
       const cambiato = !prima || prima.verdetto !== c.verdetto ||
         (c.verdetto === 'stop' && Math.abs(c.stopRegola - prima.stop) / c.R >= 0.25);
       if (!cambiato) continue;
-      await scriviKV(env, 'avviso:' + pos.id, { verdetto: c.verdetto, stop: c.stopRegola, quando: Date.now() });
+      await scriviKV(env, 'avviso:' + pos.id, { verdetto: c.verdetto, stop: c.stopRegola, quando: ora });
       if (DA_AVVISARE[c.verdetto]) {
         const r = await telegram(env, messaggio(env, pos, c));
         mandati.push({ id: pos.id, verdetto: c.verdetto, ok: r.ok });
@@ -1465,6 +1536,120 @@ async function sorveglia(env) {
     }
   }
   return { posizioni: lista.length, aperte: aperte.length, mandati };
+}
+
+/* ── gli ingressi ──
+
+   Un mercato della lista a ogni giro, a rotazione: con diciotto mercati
+   ognuno viene guardato ogni diciotto minuti. Tutti insieme ogni minuto non
+   ci stanno nei dieci millisecondi di calcolo del piano gratuito, e per uno
+   che gioca sulle giornaliere un quarto d'ora non cambia niente.
+
+   La rotazione segue l'orologio (minuto % lunghezza della lista), non un
+   contatore: un contatore andrebbe scritto in KV a ogni giro, 1440 volte al
+   giorno, e il piano gratuito ne concede mille.
+
+   Quando un mercato diventa pronto per il tuo profilo arriva l'avviso, con
+   l'ordine gia' calcolato come nell'app. Non arriva se:
+     - il mercato e' chiuso;
+     - sei gia' dentro su quel mercato, o hai gia' tutti i colpi del profilo
+       aperti (l'avviso arrivera' quando si libera un posto, se e' ancora pronto);
+     - te l'ha gia' detto nelle ultime 12 ore (3 in intraday) per la stessa
+       direzione: un punteggio che balla attorno alla soglia non deve
+       mandarti cinque messaggi;
+     - con il tuo budget non si arriva alla taglia minima. */
+
+function messaggioIngresso(env, epic, nome, an, p, valuta) {
+  const M = Motore;
+  const verbo = p.dir > 0 ? 'compra' : 'vendi';
+  const q = M.fmtNum(p.dim, p.passo < 1 ? 2 : 0);
+  const ordine = p.tipo === 'mercato' ? verbo.charAt(0).toUpperCase() + verbo.slice(1) + ' ' + q + ' a mercato, circa ' + M.fmtPrezzo(p.entrata) + '.'
+    : p.tipo === 'limite' ? 'Ordine limite: ' + verbo + ' ' + q + ' a ' + M.fmtPrezzo(p.entrata) + '.'
+    : 'Ordine stop: ' + verbo + ' ' + q + ' se tocca ' + M.fmtPrezzo(p.entrata) + '.';
+  return [
+    '<b>ENTRA · ' + html(nome) + ' ' + (p.dir > 0 ? 'lungo' : 'corto') + '</b> · grado ' + an.grado + ' (' + M.segno(an.punti) + ')',
+    html(ordine),
+    'Stop ' + M.fmtPrezzo(p.stop) + ' · obiettivi ' + M.fmtPrezzo(p.tp1) + ' / ' + M.fmtPrezzo(p.tp2),
+    'Rischio ' + M.fmtNum(p.perdita, 0) + ' ' + html(valuta) + ' · margine ' + M.fmtNum(p.margine, 0) + ' ' + html(valuta) + ' (leva ' + M.fmtLeva(p.leva) + ')',
+    html(p.motivoTempo),
+    '',
+    '<a href="' + html(env.APP || APP_PREDEFINITA) + '#colpo/' + encodeURIComponent(epic) + '">Apri il piano</a>',
+  ].join('\n');
+}
+
+async function cambioVerso(env, da, a) {
+  if (!da || !a || da === a) return 1;
+  const mid = d => { const s = d.snapshot || {}; return (s.bid + s.offer) / 2; };
+  try { const x = mid(await leggi(env, 'markets/' + da + a, new URLSearchParams())); if (x > 0) return x; } catch (e) { /* si prova al contrario */ }
+  try { const x = mid(await leggi(env, 'markets/' + a + da, new URLSearchParams())); if (x > 0) return 1 / x; } catch (e) { /* niente */ }
+  return 1;
+}
+
+async function sorvegliaIngressi(env, ctx, lista, imp, rifEpic, ora) {
+  if (imp.ingressi === false) return { saltato: 'spenti dall\'app' };
+  const elenco = Array.isArray(imp.lista) ? imp.lista : [];
+  if (!Motore.PROFILI[imp.profilo] || !(imp.budget > 0) || !elenco.length) {
+    return { saltato: 'mancano le impostazioni: apri l\'app collegata al ponte' };
+  }
+  const M = Motore, P = M.PROFILI[imp.profilo];
+  const stile = M.STILI[imp.stile] ? imp.stile : 'swing', S = M.STILI[stile];
+  const epic = elenco[Math.floor(ora / 60000) % elenco.length];
+  const esito = { epic };
+  const d = await leggi(env, 'markets/' + epic, new URLSearchParams());
+  const sn = d.snapshot || {};
+  if (sn.marketStatus !== 'TRADEABLE') return { ...esito, saltato: 'chiuso' };
+
+  const cs = await candeleDi(env, epic, S.segnale, S.candeleVive);
+  const ct = await candeleDi(env, epic, S.tempo, S.candeleTempo);
+  const rif = epic === rifEpic ? null : await riferimentoDi(env, ctx, rifEpic, S);
+  const folle = await follaDi(env, ctx, [epic]);
+  const prezzo = sn.bid > 0 && sn.offer > 0 ? { bid: sn.bid, ask: sn.offer } : null;
+  const an = M.analizza(cs, ct, { rif, percLunghi: folle[epic], prezzo });
+  if (!an.ok) return { ...esito, saltato: an.motivo };
+  esito.punti = an.punti;
+
+  const chiave = 'ingresso:' + epic;
+  const prima = await leggiKV(env, chiave);
+  if (!M.pronto(an, imp.profilo)) {
+    /* si "spegne" solo se scende otto punti sotto la soglia, o si gira */
+    if (prima && prima.pronto && (Math.abs(an.punti) < M.sogliaProfilo(imp.profilo) - 8 || an.dir !== prima.dir)) {
+      await scriviKV(env, chiave, { pronto: false, dir: prima.dir, quando: prima.quando });
+    }
+    return { ...esito, pronto: false };
+  }
+  esito.pronto = true;
+  if (prima && prima.dir === an.dir && (prima.pronto || ora - prima.quando < (stile === 'intraday' ? 3 : 12) * 3600000)) {
+    return { ...esito, gia: true };
+  }
+  if (lista.some(p => p.epic === epic)) return { ...esito, saltato: 'sei gia\' dentro' };
+  if (lista.length >= P.colpi) return { ...esito, saltato: 'posti pieni' };
+
+  let leve = null;
+  try { leve = (await leggi(env, 'accounts/preferences', new URLSearchParams())).leverages || null; } catch (e) { leve = null; }
+  const strumento = M.strumentoDa(d, leve);
+  const cambio = await cambioVerso(env, strumento.valuta, imp.valuta);
+  const p = M.piano({ an, budget: imp.budget, profilo: imp.profilo, stile, strumento, cambio,
+                      notte: M.notteDa(d.instrument && d.instrument.overnightFee) || undefined });
+  if (!p.ok || !p.ammesso || p.sottoMinimo) return { ...esito, saltato: 'budget sotto la taglia minima' };
+
+  const r = await telegram(env, messaggioIngresso(env, epic, (d.instrument && d.instrument.name) || epic, an, p, imp.valuta || strumento.valuta || ''));
+  if (r.ok) await scriviKV(env, chiave, { pronto: true, dir: an.dir, grado: an.grado, quando: ora });
+  return { ...esito, mandato: r.ok, dim: p.dim, stop: p.stop };
+}
+
+async function sorveglia(env, ora) {
+  ora = ora || Date.now();
+  if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_CHAT || !env.MEMORIA) return { saltato: 'avvisi spenti' };
+  const imp = (await leggiKV(env, 'impostazioni')) || {};
+  const rifEpic = imp.riferimento || env.RIFERIMENTO || 'US500';
+  const ctx = { rif: {}, folle: {} };
+  const lista = await posizioniAperte(env);
+  /* prima le uscite: sono quelle che costano soldi se arrivano tardi */
+  const uscite = await sorvegliaUscite(env, ctx, lista, imp, rifEpic, ora);
+  let ingressi;
+  try { ingressi = await sorvegliaIngressi(env, ctx, lista, imp, rifEpic, ora); }
+  catch (e) { ingressi = { errore: e.message }; }
+  return { ...uscite, ingressi };
 }
 
 /* ─────────────────────────── le porte ─────────────────────────── */
@@ -1502,6 +1687,24 @@ async function gestisci(req, env, ctx) {
       const percorso = decodeURIComponent(url.pathname.slice('/api/cap/'.length));
       return json(await leggi(env, percorso, url.searchParams), 200, extra);
     }
+    if (url.pathname === '/api/impostazioni' && req.method === 'GET') {
+      return json({ memoria: !!env.MEMORIA, impostazioni: (await leggiKV(env, 'impostazioni')) || null }, 200, extra);
+    }
+    if (url.pathname === '/api/impostazioni' && req.method === 'POST') {
+      if (!env.MEMORIA) return json({ errore: 'Senza il deposito MEMORIA il ponte non puo\' ricordare niente.' }, 400, extra);
+      const b = await req.json();
+      const imp = {
+        lista: (Array.isArray(b.lista) ? b.lista : []).map(String).filter(e => /^[A-Za-z0-9._-]{1,40}$/.test(e)).slice(0, 60),
+        profilo: Motore.PROFILI[b.profilo] ? b.profilo : 'aggressivo',
+        stile: Motore.STILI[b.stile] ? b.stile : 'swing',
+        budget: +b.budget > 0 ? +b.budget : null,
+        riferimento: /^[A-Za-z0-9._-]{1,40}$/.test(String(b.riferimento || '')) ? String(b.riferimento) : 'US500',
+        valuta: /^[A-Z]{3}$/.test(String(b.valuta || '')) ? String(b.valuta) : '',
+        ingressi: b.ingressi !== false,
+      };
+      await scriviKV(env, 'impostazioni', imp);
+      return json({ ok: true, impostazioni: imp }, 200, extra);
+    }
     if (url.pathname === '/api/segui' && req.method === 'GET') {
       const manuali = (await leggiKV(env, 'manuali')) || [];
       return json({ memoria: !!env.MEMORIA, manuali }, 200, extra);
@@ -1537,12 +1740,12 @@ async function gestisci(req, env, ctx) {
       return json({ ok: true }, 200, extra);
     }
     if (url.pathname === '/api/telegram/prova' && req.method === 'POST') {
-      const r = await telegram(env, '<b>Mirino</b>\nGli avvisi arrivano qui. Quando una posizione aperta va toccata, te lo scrivo.' +
+      const r = await telegram(env, '<b>Mirino</b>\nGli avvisi arrivano qui: quando un mercato della lista e\' pronto per entrare, e quando una posizione aperta va toccata.' +
         (env.MEMORIA ? '' : '\n\nAttenzione: manca il deposito MEMORIA, senza gli avvisi automatici restano spenti.'));
       return json(r, r.ok ? 200 : 400, extra);
     }
     if (url.pathname === '/api/sorveglia' && req.method === 'POST') {
-      return json(await sorveglia(env), 200, extra);
+      return json(await sorveglia(env, Date.now()), 200, extra);
     }
     return json({ errore: 'Non c\'e\' niente qui.' }, 404, extra);
   } catch (e) {
@@ -1554,6 +1757,6 @@ async function gestisci(req, env, ctx) {
 export default {
   fetch: gestisci,
   async scheduled(evento, env, ctx) {
-    ctx.waitUntil(sorveglia(env).catch(e => console.log('sorveglianza:', e.message)));
+    ctx.waitUntil(sorveglia(env, evento && evento.scheduledTime).catch(e => console.log('sorveglianza:', e.message)));
   },
 };

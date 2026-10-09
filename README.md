@@ -11,7 +11,9 @@ entrare, quanto mettere e — la parte che conta, a leva — **quando uscire**.
 
 Gli dici quanto vuoi mettere in gioco. Lei guarda indici e titoli, sceglie i
 colpi, li dimensiona sulla leva del tuo conto e, quando entri, ti segue: tieni,
-sposta lo stop, prendi metà, rinforza, esci. Se l'app è chiusa, te lo scrive su Telegram.
+sposta lo stop, prendi metà, rinforza, esci. Se l'app è chiusa, te lo scrive su
+Telegram — e ti scrive anche quando un mercato della lista è pronto per entrare,
+con l'ordine già calcolato.
 
 Il profilo di partenza è **medio-alto**: il 4% del budget a colpo, segnali A e B,
 fino a tre colpi aperti. Non è prudente, e non vuole esserlo. Ma ogni colpo ha
@@ -147,16 +149,18 @@ quello che serve, da una lista di percorsi scritta nel codice. **In sola lettura
 non sa aprire né chiudere posizioni.
 
 Ogni minuto guarda le posizioni aperte e, se il consiglio cambia, ti scrive su
-**Telegram**. Usa lo stesso `motore.js` dell'app, cucito dentro `server/worker.js`:
-telefono e ponte non possono dare consigli diversi.
+**Telegram**. Nello stesso giro guarda un mercato della lista, a rotazione, e se
+è pronto per il tuo profilo ti manda l'ordine da fare. Usa lo stesso `motore.js`
+dell'app, cucito dentro `server/worker.js`, e legge il segnale sulle stesse 400
+candele dell'app: telefono e ponte non possono dare consigli diversi.
 
 Istruzioni passo per passo: [`server/COME-SI-ACCENDE.md`](server/COME-SI-ACCENDE.md).
 
 ## Come è verificato
 
 ```bash
-node tools/test_motore.js      # 55 controlli sul motore
-node tools/test_ponte.mjs      # 32 controlli sul ponte, con un Capital.com finto
+node tools/test_motore.js      # 61 controlli sul motore
+node tools/test_ponte.mjs      # 41 controlli sul ponte, con un Capital.com finto
 node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 ```
 
@@ -169,6 +173,7 @@ node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 | Aggiungere lo spread | il risultato peggiora, mai migliora |
 | Il ponte: percorsi non in lista, scritture verso Capital.com, altri siti, codici sbagliati | tutti respinti |
 | Il ponte: stesso consiglio due minuti di fila | nessun secondo messaggio, nessuna scrittura |
+| Il ponte: avvisi d'ingresso su un giro della lista | esattamente i mercati che l'app chiama pronti, con la stessa taglia e lo stesso stop |
 
 Il test sulla passeggiata a caso è quello decisivo: su un mercato senza memoria
 nessuna regola può guadagnare. Se il backtest dicesse il contrario, starebbe barando.

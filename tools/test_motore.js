@@ -276,6 +276,23 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
   prova('consiglio intraday: a dieci minuti dalla chiusura si esce', sera.verdetto === 'esci', sera.frase);
 })();
 
+/* ── le traduzioni condivise fra app e ponte ────────────────────────────── */
+(function () {
+  var d = { instrument: { epic: 'NVDA', type: 'SHARES', currency: 'USD', marginFactor: 20, marginFactorUnit: 'PERCENTAGE',
+                          overnightFee: { longRate: -0.0178, shortRate: 0.0042 } },
+            dealingRules: { minDealSize: { unit: 'POINTS', value: 1 }, minSizeIncrement: { unit: 'POINTS', value: 0.5 },
+                            minNormalStopOrLimitDistance: { unit: 'PERCENTAGE', value: 0.1 } } };
+  var st = M.strumentoDa(d, { SHARES: { current: 3, available: [1, 2, 3, 5] } });
+  prova('strumento: leva dal conto, margine e regole da Capital.com', st.leva === 3 && st.fattoreMargine === 20 && st.dimMin === 1 &&
+        st.passo === 0.5 && st.distMinStopPerc === 0.1 && st.valuta === 'USD', JSON.stringify(st));
+  prova('strumento: senza leve del conto, leva vuota (il piano usa quella massima)', M.strumentoDa(d, null).leva === null);
+  var nt = M.notteDa(d.instrument.overnightFee);
+  prova('notti: tasso negativo = si paga, positivo = si incassa', vicino(nt.lungo, 0.000178) && vicino(nt.corto, -0.000042), JSON.stringify(nt));
+  prova('notti: un tasso annuo si riporta a una notte', vicino(M.notteDa({ longRate: -6.4, shortRate: -1 }).lungo, 6.4 / 360 / 100));
+  prova('pronto: un B si gioca da aggressivo, non da deciso', M.pronto({ ok: true, grado: 'B' }, 'aggressivo') && !M.pronto({ ok: true, grado: 'B' }, 'deciso'));
+  prova('soglie dei profili', M.sogliaProfilo('deciso') === 55 && M.sogliaProfilo('aggressivo') === 40 && M.sogliaProfilo('spinto') === 28);
+})();
+
 /* ── orari di mercato ───────────────────────────────────────────────────── */
 (function () {
   var usa = { mon: ['13:30 - 20:00'], tue: ['13:30 - 20:00'], wed: ['13:30 - 20:00'], thu: ['13:30 - 20:00'],

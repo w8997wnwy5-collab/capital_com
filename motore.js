@@ -386,10 +386,16 @@ function punteggio(ser, t, extra) {
    lo SWING legge le candele giornaliere e cerca il momento sulle orarie, e
    tiene da qualche giorno a tre settimane; l'INTRADAY legge le orarie, cerca
    il momento sui quarti d'ora e chiude prima di sera, cosi' non paga notti. */
+/* candele: quante se ne chiedono per il backtest. candeleVive: quante ne
+   usa il segnale di ADESSO, nell'app e nel ponte. Devono essere le stesse
+   in tutti e due: le medie lunghe partono da un seme, e una storia di 1000
+   candele e una di 400 possono dare punteggi diversi di qualche punto.
+   Quattrocento bastano per la media a 200 e costano al ponte un terzo del
+   calcolo: su Cloudflare gratis ogni giro ha dieci millisecondi. */
 var STILI = {
-  swing:    { nome: 'Swing', segnale: 'DAY', tempo: 'HOUR', candele: 1000, candeleTempo: 300,
+  swing:    { nome: 'Swing', segnale: 'DAY', tempo: 'HOUR', candele: 1000, candeleVive: 400, candeleTempo: 300,
               barMs: 86400000, maxBarre: 20, orizzonte: 5, unita: 'giorni' },
-  intraday: { nome: 'Intraday', segnale: 'HOUR', tempo: 'MINUTE_15', candele: 1000, candeleTempo: 300,
+  intraday: { nome: 'Intraday', segnale: 'HOUR', tempo: 'MINUTE_15', candele: 1000, candeleVive: 400, candeleTempo: 300,
               barMs: 3600000, maxBarre: 7, orizzonte: 6, unita: 'ore', chiudiASera: true }
 };
 
@@ -423,6 +429,43 @@ var PESO_GRADO = { A: 1, B: 0.75, C: 0.5 };
    questo: circa il riferimento USA piu' 2.5% l'anno, diviso 360, sul valore
    intero della posizione (non sul margine: e' li' che la leva morde). */
 var NOTTE_PREDEFINITA = { lungo: 0.00018, corto: 0.00004 };
+
+/* Il profilo giocherebbe questo segnale? Una riga, ma la usano il radar
+   dell'app e gli avvisi d'ingresso del ponte: deve essere la stessa. */
+function pronto(an, profilo) {
+  var prof = PROFILI[profilo];
+  return !!(an && an.ok && an.grado && prof && prof.gradi.indexOf(an.grado) >= 0);
+}
+function sogliaProfilo(profilo) {
+  var g = (PROFILI[profilo] || PROFILI.aggressivo).gradi;
+  return g.indexOf('C') >= 0 ? 28 : g.indexOf('B') >= 0 ? 40 : 55;
+}
+
+/* Da un mercato di Capital.com (/markets/{epic} o una voce di marketDetails)
+   allo strumento che serve al piano. Anche questa e' condivisa: il piano
+   dell'app e quello dell'avviso su Telegram devono dare la stessa taglia. */
+function strumentoDa(d, leve) {
+  d = d || {};
+  var ins = d.instrument || {}, dr = d.dealingRules || {};
+  var lv = leve && ins.type && leve[ins.type] ? leve[ins.type] : null;
+  var dist = dr.minNormalStopOrLimitDistance;
+  return {
+    valuta: ins.currency, tipo: ins.type,
+    fattoreMargine: ins.marginFactorUnit === 'PERCENTAGE' ? ins.marginFactor : null,
+    leva: lv ? lv.current : null, leve: lv ? lv.available : null,
+    dimMin: dr.minDealSize ? dr.minDealSize.value : null,
+    passo: dr.minSizeIncrement ? dr.minSizeIncrement.value : null,
+    distMinStopPerc: dist && dist.unit === 'PERCENTAGE' ? dist.value : null
+  };
+}
+
+/* Capital.com da' il costo della notte in percento (negativo = paghi). Se
+   arriva un numero grande e' un tasso annuo: si divide per 360. */
+function notteDa(of) {
+  if (!of || typeof of.longRate !== 'number') return null;
+  var conv = function (r) { var d = Math.abs(r) > 0.2 ? r / 360 : r; return -d / 100; };
+  return { lungo: conv(of.longRate), corto: conv(typeof of.shortRate === 'number' ? of.shortRate : of.longRate) };
+}
 
 /* ─────────────────────────── orari di mercato ─────────────────────────── */
 
@@ -1058,6 +1101,7 @@ var API = {
   volatilita: volatilita, veroRange: veroRange,
   parti: parti, punteggio: punteggio, gradoDi: gradoDi, letturaFolla: letturaFolla,
   analizza: analizza, tempismo: tempismo, piano: piano, ripartisci: ripartisci, consiglio: consiglio,
+  pronto: pronto, sogliaProfilo: sogliaProfilo, strumentoDa: strumentoDa, notteDa: notteDa,
   backtest: backtest, riassumi: riassumi, calibra: calibra, portafoglio: portafoglio,
   derive: derive, calibraDerive: calibraDerive, previsione: previsione,
   orari: orari, barraMs: barraMs, giuAlPasso: giuAlPasso, rischioIniziale: rischioIniziale,

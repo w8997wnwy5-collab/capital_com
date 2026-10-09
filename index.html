@@ -300,7 +300,7 @@ var M = window.Motore, X = window.Esempio;
    ══════════════════════════════════════════════════════════════ */
 var VERSIONE = '1.0';
 var CHIAVI = { cfg: 'mirino_cfg_v1', mano: 'mirino_mano_v1', segui: 'mirino_segui_v1', libro: 'mirino_libro_v1',
-               visti: 'mirino_visti_v1', piani: 'mirino_piani_v1' };
+               visti: 'mirino_visti_v1', piani: 'mirino_piani_v1', inviate: 'mirino_imp_inviate_v1' };
 
 /* La lista di partenza: gli indici che contano e i titoli americani che si
    muovono di piu' fra quelli che Capital.com quota come CFD. Si cambia dalle
@@ -308,14 +308,14 @@ var CHIAVI = { cfg: 'mirino_cfg_v1', mano: 'mirino_mano_v1', segui: 'mirino_segu
 var LISTA_BASE = ['US500', 'US100', 'DE40', 'IT40', 'NVDA', 'TSLA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL',
                   'AMD', 'AVGO', 'NFLX', 'PLTR', 'COIN', 'MSTR', 'UBER'];
 var CFG_BASE = { ponte: '', chiave: '', budget: null, profilo: 'aggressivo', stile: 'swing', lista: LISTA_BASE.slice(),
-                 riferimento: 'US500', esempio: true };
+                 riferimento: 'US500', esempio: true, avvisiIngresso: true };
 
 var S = {
   tab: 'radar', cfg: null, modo: 'esempio',
   stato: 'carico', fase: 'Accendo il mirino', avanzamento: 0, errore: null, aggiornando: false,
   ponte: null, conto: null, leve: null,
   mercati: {}, cs: {}, ct: {}, folla: {}, cambi: {}, mancanti: {},
-  analisi: {}, bt: {}, calib: null, deriveCal: null, colpiTutti: [], colpiPortafoglio: [], rifSer: null,
+  analisi: {}, bt: {}, calib: null, deriveCal: null, colpiTutti: [], colpiPortafoglio: [], rifSer: null, rifVivo: null, dettagli: {},
   capPos: [], capPosCaricate: false, verdetti: {},
   scelto: null, foglio: null, avviso: null, scoperte: null, cerca: { testo: '', risultati: null, inCorso: false },
   ultimoGiro: 0, ultimoCorto: 0, ultimoLungo: 0, ultimoBattito: 0, battendo: false, grafici: {}
@@ -403,17 +403,26 @@ function avvisaPonte(id, imp, extra){
   chiediPonte('/api/segui', { metodo: 'POST', corpo: corpo }).catch(function(){});
 }
 
+/* Budget, profilo, stile e lista servono al ponte per gli avvisi d'ingresso.
+   Si mandano solo quando cambiano: ogni invio e' una scrittura nella memoria
+   del ponte, e il piano gratuito ne concede mille al giorno. */
+var timerImpostazioni = null;
+function inviaImpostazioni(){
+  if(S.modo !== 'vero' || !S.ponte || !S.ponte.memoria) return;
+  clearTimeout(timerImpostazioni);
+  timerImpostazioni = setTimeout(function(){
+    var corpo = { lista: S.cfg.lista, profilo: S.cfg.profilo, stile: S.cfg.stile, budget: S.cfg.budget,
+                  riferimento: S.cfg.riferimento, valuta: valutaConto(), ingressi: S.cfg.avvisiIngresso !== false };
+    var firma = S.cfg.ponte + '|' + JSON.stringify(corpo);
+    if(leggi(CHIAVI.inviate, '') === firma) return;
+    chiediPonte('/api/impostazioni', { metodo: 'POST', corpo: corpo })
+      .then(function(){ scrivi(CHIAVI.inviate, firma); }, function(){});
+  }, 1500);
+}
+
 /* ══════════════════════════════════════════════════════════════
    I DATI
    ══════════════════════════════════════════════════════════════ */
-function notteDa(of){
-  if(!of || typeof of.longRate !== 'number') return null;
-  /* Capital.com da' il tasso per notte in percento (negativo = paghi). Se
-     arriva un numero grande e' un tasso annuo: si divide per 360. */
-  var conv = function(r){ var d = Math.abs(r) > 0.2 ? r / 360 : r; return -d / 100; };
-  return { lungo: conv(of.longRate), corto: conv(of.shortRate) };
-}
-
 function daDettagli(d){
   var ins = d.instrument || {}, dr = d.dealingRules || {}, sn = d.snapshot || {};
   var dist = dr.minNormalStopOrLimitDistance;
@@ -423,12 +432,13 @@ function daDettagli(d){
     dimMin: dr.minDealSize ? dr.minDealSize.value : null,
     passo: dr.minSizeIncrement ? dr.minSizeIncrement.value : null,
     distMinStopPerc: dist && dist.unit === 'PERCENTAGE' ? dist.value : null,
-    orari: ins.openingHours || null, notte: notteDa(ins.overnightFee),
+    orari: ins.openingHours || null, notte: M.notteDa(ins.overnightFee),
     bid: sn.bid, ask: sn.offer, varPerc: sn.percentageChange, stato: sn.marketStatus, quando: Date.now()
   };
 }
-function aggiornaMercato(m){
+function aggiornaMercato(m, grezzo){
   if(!m || !m.epic) return;
+  if(grezzo) S.dettagli[m.epic] = grezzo;
   var v = S.mercati[m.epic] || {};
   Object.keys(m).forEach(function(k){ if(m[k] != null) v[k] = m[k]; });
   S.mercati[m.epic] = v;
@@ -442,11 +452,11 @@ function caricaMercati(epics){
   for(i = 0; i < epics.length; i += 50) gruppi.push(epics.slice(i, i + 50));
   return Promise.all(gruppi.map(function(g){
     return chiedi('markets', { epics: g.join(',') }).then(function(d){
-      (d.marketDetails || []).forEach(function(x){ aggiornaMercato(daDettagli(x)); });
+      (d.marketDetails || []).forEach(function(x){ aggiornaMercato(daDettagli(x), x); });
       g.forEach(function(e){ if(!S.mercati[e]) S.mancanti[e] = 'non arrivato'; });
     }, function(){
       return Promise.all(g.map(function(e){
-        return chiedi('markets/' + e).then(function(x){ aggiornaMercato(daDettagli(x)); delete S.mancanti[e]; },
+        return chiedi('markets/' + e).then(function(x){ aggiornaMercato(daDettagli(x), x); delete S.mancanti[e]; },
           function(err){ S.mancanti[e] = err.message; });
       }));
     });
@@ -547,8 +557,10 @@ function carica(forza){
   }).then(function(){
     S.stato = 'pronto'; S.errore = null; S.aggiornando = false;
     S.ultimoGiro = S.ultimoCorto = S.ultimoLungo = Date.now();
+    if(S.sceltoDaLink && S.analisi[S.sceltoDaLink]){ S.scelto = S.sceltoDaLink; S.sceltoDaLink = null; }
     if(!S.scelto || !S.analisi[S.scelto]) S.scelto = (classifica()[0] || {}).epic || S.cfg.lista[0];
     controllaConsigli(true);
+    inviaImpostazioni();
     render();
     if(S.tab === 'radar') caricaScoperte();
   }).catch(function(e){
@@ -567,10 +579,7 @@ function fase(testo, q){
 /* ══════════════════════════════════════════════════════════════
    L'ANALISI
    ══════════════════════════════════════════════════════════════ */
-function sogliaProfilo(){
-  var g = M.PROFILI[S.cfg.profilo].gradi;
-  return g.indexOf('C') >= 0 ? 28 : g.indexOf('B') >= 0 ? 40 : 55;
-}
+function sogliaProfilo(){ return M.sogliaProfilo(S.cfg.profilo); }
 
 function analizzaUno(ep){
   var cs = S.cs[ep], mk = S.mercati[ep] || {};
@@ -578,8 +587,10 @@ function analizzaUno(ep){
     S.analisi[ep] = { ok: false, motivo: cs ? 'Solo ' + cs.length + ' candele: troppo poche' : (S.mancanti[ep] || 'Nessuna candela') };
     return null;
   }
-  var an = M.analizza(cs, S.ct[ep], {
-    rif: ep === S.cfg.riferimento ? null : S.rifSer, percLunghi: S.folla[ep],
+  /* il segnale di adesso si legge sulle stesse candele che usa il ponte:
+     le ultime candeleVive. Cosi' telefono e Telegram non litigano. */
+  var an = M.analizza(cs.slice(-M.STILI[S.cfg.stile].candeleVive), S.ct[ep], {
+    rif: ep === S.cfg.riferimento ? null : S.rifVivo, percLunghi: S.folla[ep],
     prezzo: mk.bid > 0 ? { bid: mk.bid, ask: mk.ask } : null
   });
   S.analisi[ep] = an;
@@ -589,15 +600,18 @@ function analizzaUno(ep){
 /* Ogni mercato: analisi di adesso e storia rigiocata con le regole del
    profilo che hai scelto. Poi tutti i colpi insieme per la calibrazione. */
 function analizzaTutto(){
-  var rifCs = S.cs[S.cfg.riferimento];
+  var rifCs = S.cs[S.cfg.riferimento], vive = M.STILI[S.cfg.stile].candeleVive;
+  /* due versioni del riferimento: tutta la storia per il backtest, le
+     ultime candeleVive per il segnale di adesso */
   S.rifSer = rifCs && rifCs.length >= M.CALDO ? M.indicatori(rifCs) : null;
+  S.rifVivo = rifCs && rifCs.length >= M.CALDO ? M.indicatori(rifCs.slice(-vive)) : null;
   var soglia = sogliaProfilo(), st = M.STILI[S.cfg.stile], colpi = [], derive = [];
   S.analisi = {}; S.bt = {};
   epicsVivi().forEach(function(ep){
     var an = analizzaUno(ep);
     if(!an || !an.ok) return;
     var mk = S.mercati[ep] || {};
-    var bt = M.backtest(S.cs[ep], { ser: an.ser, soglia: soglia, stile: S.cfg.stile, notte: mk.notte || undefined });
+    var bt = M.backtest(S.cs[ep], { rif: ep === S.cfg.riferimento ? null : S.rifSer, soglia: soglia, stile: S.cfg.stile, notte: mk.notte || undefined });
     var r = M.riassumi(bt.colpi);
     r.colpi = bt.colpi;
     S.bt[ep] = r;
@@ -605,7 +619,7 @@ function analizzaTutto(){
        aperta su un mercato strano non deve spostare le probabilita' di tutti */
     if(S.cfg.lista.indexOf(ep) >= 0 || ep === S.cfg.riferimento){
       bt.colpi.forEach(function(c){ c.epic = ep; colpi.push(c); });
-      derive = derive.concat(M.derive(an.ser, bt.punti, st.orizzonte));
+      derive = derive.concat(M.derive(bt.ser, bt.punti, st.orizzonte));
     }
   });
   colpi.sort(function(a, b){ return a.t - b.t; });
@@ -626,6 +640,8 @@ function classifica(){
 }
 
 function strumentoDi(ep){
+  /* la stessa traduzione che usa il ponte per gli avvisi d'ingresso */
+  if(S.dettagli[ep]) return M.strumentoDa(S.dettagli[ep], S.leve);
   var mk = S.mercati[ep] || {};
   var lv = S.leve && mk.tipo && S.leve[mk.tipo] ? S.leve[mk.tipo] : null;
   return { valuta: mk.valuta, fattoreMargine: mk.fattoreMargine, leva: lv ? lv.current : null, leve: lv ? lv.available : null,
@@ -748,7 +764,8 @@ function assicuraRischio(pos){
   if(pos.R > 0 || pos.stopIniziale != null) return pos;
   var cs = S.cs[pos.epic];
   if(!cs || cs.length < 20) return pos;
-  var R = M.rischioIniziale(cs, M.indicatori(cs), pos.aperta);
+  var vive = cs.slice(-M.STILI[S.cfg.stile].candeleVive);
+  var R = M.rischioIniziale(vive, M.indicatori(vive), pos.aperta);
   if(!R) return pos;
   pos.R = R;
   if(pos.manuale){ salvaManuale(pos.id, { R: R }); }
@@ -1374,7 +1391,8 @@ function tabGioco(){
   h += '<div class="fila" style="margin:4px 0 0"><button class="btn" onclick="apriManuale()">Aggiungi a mano</button></div>';
   if(S.modo === 'vero'){
     h += '<p class="piccolo" style="margin:12px 3px 0">' + (S.ponte && S.ponte.telegram && S.ponte.memoria
-      ? 'Il ponte sorveglia le posizioni anche con l\'app chiusa: quando un consiglio cambia, arriva su Telegram.'
+      ? 'Il ponte sorveglia le posizioni anche con l\'app chiusa: quando un consiglio cambia, arriva su Telegram. ' +
+        (S.cfg.avvisiIngresso !== false ? 'E ti scrive anche quando un mercato della lista e\' pronto per entrare.' : '')
       : 'Con l\'app chiusa nessuno ti avvisa. Accendi gli avvisi su Telegram: istruzioni nella scheda Ponte.') + '</p>';
   }
   h += libroHTML();
@@ -1516,9 +1534,14 @@ function tabPonte(){
   if(S.modo === 'vero' && S.ponte){
     h += '<div class="h2">Avvisi su Telegram</div><div class="card">' +
       (S.ponte.telegram && S.ponte.memoria
-        ? '<p class="piccolo" style="margin:0 0 10px">Accesi. Ogni minuto il ponte guarda le posizioni aperte e ti scrive quando il consiglio cambia.</p>'
+        ? '<p class="piccolo" style="margin:0 0 10px">Accesi. Ogni minuto il ponte guarda le posizioni aperte e ti scrive quando il consiglio cambia, anche con l\'app chiusa.</p>'
         : '<p class="piccolo" style="margin:0 0 10px">' + (!S.ponte.telegram ? 'Mancano i segreti TELEGRAM_TOKEN e TELEGRAM_CHAT nel Worker. ' : '') +
           (!S.ponte.memoria ? 'Manca il deposito MEMORIA (KV) collegato al Worker. ' : '') + 'Istruzioni nella guida del ponte.</p>') +
+      '<div class="seg" style="margin-bottom:10px"><button class="' + (S.cfg.avvisiIngresso !== false ? 'on' : '') + '" onclick="impostaIngressi(true)">Uscite e ingressi</button>' +
+      '<button class="' + (S.cfg.avvisiIngresso === false ? 'on' : '') + '" onclick="impostaIngressi(false)">Solo uscite</button></div>' +
+      '<p class="piccolo" style="margin:0 0 10px">' + (S.cfg.avvisiIngresso !== false
+        ? 'Gli ingressi: il ponte guarda un mercato della lista al minuto, a rotazione (ognuno circa ogni ' + S.cfg.lista.length + ' minuti), e ti scrive l\'ordine quando uno diventa pronto per il profilo ' + esc(M.PROFILI[S.cfg.profilo].nome) + '. Non ti scrive se sei gia\' dentro o hai gia\' ' + M.PROFILI[S.cfg.profilo].colpi + ' colpi aperti.'
+        : 'Solo le uscite: ti scrive quando una posizione aperta va toccata.') + '</p>' +
       '<button class="btn" onclick="provaTelegram()"' + (S.ponte.telegram ? '' : ' disabled') + '>Manda un messaggio di prova</button></div>';
   }
 
@@ -1618,10 +1641,12 @@ function impostaBudget(v){
   var x = parseFloat(String(v).replace(',', '.'));
   S.cfg.budget = x > 0 ? x : null;
   salvaCfg();
+  inviaImpostazioni();
   render();
 }
 function impostaProfilo(k){
   S.cfg.profilo = k; salvaCfg();
+  inviaImpostazioni();
   analizzaTutto(); render();
 }
 function impostaStile(k){
@@ -1761,6 +1786,7 @@ function usaEsempio(){
   S.modo = 'esempio'; S.mercati = {}; S.cs = {}; S.ct = {}; S.capPos = []; S.capPosCaricate = false; S.cambi = {}; S.scoperte = null; S.verdetti = {};
   S.stato = 'carico'; carica(true);
 }
+function impostaIngressi(si){ S.cfg.avvisiIngresso = !!si; salvaCfg(); inviaImpostazioni(); render(); }
 function provaTelegram(){
   chiediPonte('/api/telegram/prova', { metodo: 'POST' }).then(function(){ mostraAvviso('Mandato', 'Guarda su Telegram.'); },
     function(e){ mostraAvviso('Telegram non risponde', e.message); });
@@ -1784,14 +1810,14 @@ function cerca(t){
 }
 function aggiungiMercato(ep){
   if(S.cfg.lista.indexOf(ep) >= 0){ scegli(ep); return; }
-  S.cfg.lista.push(ep); salvaCfg();
+  S.cfg.lista.push(ep); salvaCfg(); inviaImpostazioni();
   mostraAvviso('Aggiunto', ep + ': leggo le candele.');
   caricaMercati([ep]).then(caricaCambi).then(function(){ return Promise.all([caricaCandele(ep), caricaFolla([ep])]); }).then(function(){
     analizzaTutto(); render();
   });
 }
 function togliMercato(ep){
-  S.cfg.lista = S.cfg.lista.filter(function(e){ return e !== ep; }); salvaCfg();
+  S.cfg.lista = S.cfg.lista.filter(function(e){ return e !== ep; }); salvaCfg(); inviaImpostazioni();
   analizzaTutto(); render();
 }
 function ripristinaLista(){ S.cfg.lista = LISTA_BASE.slice(); salvaCfg(); S.stato = 'carico'; carica(true); }
@@ -1896,8 +1922,14 @@ if('serviceWorker' in navigator && location.protocol.indexOf('http') === 0){
   navigator.serviceWorker.register('sw.js').catch(function(){});
 }
 caricaCfg();
-var ancora = (location.hash || '').slice(1);
-if(TITOLI[ancora]) S.tab = ancora;
+/* #gioco, #colpo e #colpo/NVDA: dai link dei messaggi su Telegram */
+var ancora = decodeURIComponent((location.hash || '').slice(1)).split('/');
+if(TITOLI[ancora[0]]) S.tab = ancora[0];
+if(ancora[0] === 'colpo' && /^[A-Za-z0-9._-]{1,40}$/.test(ancora[1] || '')) S.sceltoDaLink = ancora[1];
+window.addEventListener('hashchange', function(){
+  var a = decodeURIComponent((location.hash || '').slice(1)).split('/');
+  if(a[0] === 'colpo' && S.analisi[a[1]]){ S.scelto = a[1]; S.tab = 'colpo'; render(); window.scrollTo(0, 0); }
+});
 carica(false);
 </script>
 </body>
