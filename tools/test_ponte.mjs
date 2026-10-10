@@ -533,14 +533,17 @@ st = robotKV();
 prova('rapido: guarda due mercati al minuto', st.stile === 'rapido' && Object.keys(st.visti).length === 2 && telegrammi.some(t => /Rapido/.test(t.text || '') && /2 al minuto/.test(t.text)),
       Object.keys(st.visti).join(','));
 await giroRobot(alle(14, 14, 1), Math.ceil(nAz / 2));
+await giroRobot(alle(14, 14, 1) + 13 * 60000, 1);    /* le occhiate vanno in KV ogni cinque minuti */
 st = robotKV();
 const nuovi = broker.ordini.slice(ordiniRapido);
-prova('rapido: apre, con il take profit a 1.5 volte la distanza dello stop', nuovi.length > 0 && nuovi.every(o => {
+prova('rapido: se apre, il take profit e\' a 1 volta la distanza dello stop', nuovi.every(o => {
   const a = st.aperte.find(x => x.epic === o.epic);
   if (!a) return true;
-  return Math.abs(Math.abs(o.profitLevel - a.entrata) / Math.abs(a.entrata - o.stopLevel) - 1.5) < 0.05;
-}), nuovi.map(o => o.epic + ' stop ' + o.stopLevel + ' tp ' + o.profitLevel).join(', '));
-prova('rapido: tutti i mercati della lista guardati in mezzo giro', AZ.every(ep => st.visti[ep]));
+  return Math.abs(Math.abs(o.profitLevel - a.entrata) / Math.abs(a.entrata - o.stopLevel) - 1) < 0.05;
+}), nuovi.length + ' ordini: ' + nuovi.map(o => o.epic + ' stop ' + o.stopLevel + ' tp ' + o.profitLevel).join(', '));
+prova('rapido: per ogni mercato il motivo parla di trend, ritracciamento o spread (non del punteggio)',
+      AZ.every(ep => st.visti[ep] && /trend|Discesa|Rimbalzo|spread|aperta|chiuso|gia' dentro|media a 200|margine|posti/.test(st.visti[ep].motivo)),
+      AZ.map(ep => ep + ': ' + (st.visti[ep] ? st.visti[ep].motivo : '—')).join(' | '));
 
 /* i comandi da Telegram */
 await chiedi('/api/robot/ferma', { metodo: 'POST', corpo: { chiudi: true } });

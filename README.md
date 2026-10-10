@@ -94,9 +94,9 @@ La direzione la dice la scala lunga, il momento la scala corta.
 
 Tre stili: **Swing** (segnale sulle giornaliere, momento sulle orarie, da qualche
 giorno a tre settimane), **Intraday** (orarie e quarti d'ora, fuori prima della
-chiusura) e **Rapido**, il mordi e fuggi: segnale sui quarti d'ora, momento sui
-cinque minuti, stop a 1.2 ATR, pareggio a +0.6R, tutto incassato a +1.5R, mai
-più di due ore dentro, fuori prima di sera. Entra, guadagna, esce.
+chiusura) e **Rapido**, il mordi e fuggi con una ragione: sui quarti d'ora
+compra la discesa dentro una salita (e vende il rimbalzo dentro una discesa),
+incassa tutto a +1R, mai più di un'ora dentro, fuori prima di sera.
 
 ### Quanto mettere
 
@@ -128,9 +128,30 @@ Una regola sola, usata uguale dal piano, dal consiglio e dal backtest:
 | candela violenta contro | si esce senza aspettare lo stop |
 | intraday e rapido, 20 minuti alla chiusura | fuori |
 
-Il **Rapido** ha regole sue, più corte: stop a 1.2 ATR, pareggio a +0.6R, lo
-stop che insegue da +0.8R a 1 ATR, obiettivo pieno a +1.5R, al massimo otto
-quarti d'ora.
+Il **Rapido** ha regole sue e non usa il punteggio. Entra solo con un trend
+chiaro (prezzo sopra la media di circa 50 ore e la media che sale, o il
+contrario) e dopo una discesa di almeno 2 ATR sotto la media corta; salta i
+mercati dove lo spread supera il 10% dell'ATR. Stop a 1.2 ATR, tutto a +1R,
+al massimo quattro quarti d'ora, niente pareggio e niente stop che insegue.
+
+### Il Rapido sui dati veri
+
+Prima di metterlo nel robot è stato misurato su sei anni di prezzi veri al
+minuto (histdata, 2013-2018) di S&P 500, DAX, Euro Stoxx 50 e Nikkei, con lo
+spread tipico di Capital.com e lo slittamento sugli stop. Le regole si
+tarano sul 2013-2015 e si verificano sul 2016-2018 senza ritocchi; il codice
+di ogni idea l'ha controllato un verificatore separato.
+
+| Regola sui 15 minuti | 2016-2018, a colpo, con i costi |
+|---|---|
+| Il punteggio (il Rapido di prima) | −0.13R, 10-13 colpi al giorno per indice |
+| Punteggio con filtri (sessione, trend orario, solo A, spread) | −0.035R |
+| Rottura del range d'apertura, momento di fine giornata | −0.03R e −0.015R |
+| "Chiudi appena sei in guadagno" (take profit a 0.5R) | sempre peggio: vinci il 55-58%, servirebbe il 66% |
+| **Discesa di 2 ATR dentro un trend (il Rapido di adesso)** | **+0.024R** (+0.087R prima dei costi, su tutti e 4 gli indici); circa un colpo ogni 4-5 giorni per indice |
+
+È la sola che regge, e regge poco: +0.024R a colpo non è una certezza
+statistica. Sui quarti d'ora lo spread si mangia quasi tutto il vantaggio.
 
 Il consiglio non ha memoria: si ricava tutto dal prezzo d'entrata e dalle
 candele dopo. Così il telefono e il ponte arrivano alla stessa risposta senza parlarsi.
@@ -181,7 +202,7 @@ chiusa. Il telefono lo accende, lo spegne e lo guarda.
 | Profilo | **Estremo**: segnali A, B e C, fino a 10 posizioni |
 | Quanto rischia | gioca per il massimo: si ragiona sulla **perdita massima**, non sul budget del Colpo. Un A rischia un terzo del tetto, un B un quarto, un C un sesto (con 60 CHF: 20, 15, 10). La taglia minima di Capital.com va bene fino a metà del tetto |
 | Leva | se lo scegli all'avvio, il robot alza la leva al **massimo che Capital.com ti concede** per ogni tipo di strumento. Con un conto piccolo è il margine (ne usa fino al 95%) moltiplicato per la leva a decidere quanto è grande una posizione |
-| Stile | quello che scegli prima di *Avvia*. Per entrare, incassare e uscire tante volte al giorno: **Rapido** (quarti d'ora, take profit a +1.5R, rientra sullo stesso mercato dopo un quarto d'ora) |
+| Stile | quello che scegli prima di *Avvia*. **Rapido**: compra la discesa dentro una salita sui quarti d'ora, take profit a +1R, al massimo un'ora; rientra sullo stesso mercato dopo un quarto d'ora |
 | Quando entra | a rotazione, uno o due mercati della lista al minuto; solo se il segnale è pronto **e** il momento è "entra ora" (mai a prezzo scappato) |
 | Protezione | ogni posizione nasce con **stop loss** e **take profit** già su Capital.com: se il ponte si ferma, restano |
 | Gestione | stop a pareggio, poi lo stop che insegue; esce se il segnale si gira, dopo il tempo massimo, prima della chiusura. Una posizione sola per colpo: niente metà |
@@ -208,7 +229,7 @@ node tools/cuci_worker.js      # ricuce server/worker.js dopo ogni modifica
 | EMA, RSI, ATR contro un'implementazione scritta a parte | scarto 0 |
 | Il punteggio alla candela t, tagliando la storia a t (anche l'indice) | identico: nessuno sguardo nel futuro |
 | Passeggiata a caso senza costi, 6'500 colpi (anche con le regole del robot) | R medio −0.01 e −0.02, t = −0.7 e −1.2: compatibile con zero, come deve |
-| Lo stesso con le regole del Rapido, 16'000 colpi sui quarti d'ora | R medio +0.001, t = 0.2: zero |
+| Il Rapido sui dati veri 2016-2018 (vedi sopra), rifatto dal motore del progetto | 641 colpi, +0.024R a colpo: identico alla verifica indipendente |
 | Ogni prezzo d'entrata e d'uscita del backtest dentro la sua candela | 0 fuori su 13'000 |
 | Aggiungere lo spread | il risultato peggiora, mai migliora |
 | Il ponte: percorsi non in lista, scritture verso Capital.com, altri siti, codici sbagliati | tutti respinti |

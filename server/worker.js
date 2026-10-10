@@ -394,6 +394,46 @@ function punteggio(ser, t, extra) {
   return { punti: tot, dir: tot > 0 ? 1 : (tot < 0 ? -1 : 0), grado: gradoDi(tot), parti: p };
 }
 
+/* ─────────────────────────── il ritracciamento nel trend ───────────────────────────
+
+   Il segnale del Rapido. Tre condizioni, tutte sulle candele da 15 minuti:
+
+     trend      il prezzo sopra la media a 200 candele (circa 50 ore) e la
+                media che sale da 20 candele (5 ore): si compra. Il contrario:
+                si vende. Altrimenti niente.
+     discesa    il prezzo e' andato CONTRO il trend di almeno 2 ATR rispetto
+                alla media a 20: in un trend su, e' sceso sotto la media a 20
+                di 2 volte il movimento tipico. Si compra li', dove chi ha
+                venduto sullo strappo comincia a ricomprare.
+     costo      lo spread al massimo il 10% dell'ATR: dove lo spread e' grande
+                rispetto al movimento, se lo mangia tutto.
+
+   Misurato su US500, DE40, EU50 e J225, 2013-2018, con spread e slittamento:
+   tarato sul 2013-2015, verificato sul 2016-2018 senza ritocchi. Prima dei
+   costi rende +0.09R a colpo anche negli anni di verifica, su tutti e
+   quattro gli indici. Dopo i costi resta poco: +0.02R a colpo, che non e'
+   una certezza statistica. E' il meglio che regge; il punteggio a 15 minuti
+   perdeva -0.13R a colpo. */
+var RITRACCIO = { distanza: 2, pendenza: 20, spreadMax: 0.10 };
+
+function ritraccio(ser, t, spreadOra) {
+  var k = ser.k, at = ser.atr[t], c = k.c[t], e20 = ser.ema20[t], e = ser.ema200[t], e0 = ser.ema200[t - RITRACCIO.pendenza];
+  if (!(at > 0) || !finito(e20) || !finito(e) || !finito(e0)) return { dir: 0, trend: 0, motivo: 'servono piu\' candele (media a 200)' };
+  var trend = c > e && e > e0 ? 1 : (c < e && e < e0 ? -1 : 0);
+  var dist = (c - e20) / at, sp = finito(spreadOra) ? spreadOra : k.s[t];
+  var out = { dir: 0, trend: trend, distanza: dist, spreadAtr: sp / at, motivo: '' };
+  if (!trend) out.motivo = 'nessun trend chiaro';
+  else if (dist * trend > -RITRACCIO.distanza) {
+    out.motivo = (trend > 0 ? 'trend su' : 'trend giu\'') + ', aspetta ' + (trend > 0 ? 'una discesa' : 'un rimbalzo') + ': ' +
+      fmtNum(Math.max(0, -dist * trend), 1) + ' ATR su ' + RITRACCIO.distanza;
+  } else {
+    out.dir = trend;
+    out.motivo = (trend > 0 ? 'Discesa' : 'Rimbalzo') + ' di ' + fmtNum(Math.abs(dist), 1) + ' ATR dentro un trend ' + (trend > 0 ? 'su' : 'giu\'') +
+      ': si ' + (trend > 0 ? 'compra' : 'vende') + ' il ritorno.';
+  }
+  return out;
+}
+
 /* ─────────────────────────── stili e profili ─────────────────────────── */
 
 /* Due modi di giocare. Le regole sono le stesse, cambia la scala dei tempi:
@@ -406,18 +446,23 @@ function punteggio(ser, t, extra) {
    candele e una di 400 possono dare punteggi diversi di qualche punto.
    Quattrocento bastano per la media a 200 e costano al ponte un terzo del
    calcolo: su Cloudflare gratis ogni giro ha dieci millisecondi. */
-/* Il RAPIDO e' il mordi e fuggi: legge i quarti d'ora, cerca il momento sui
-   cinque minuti, incassa tutto a +1.5R e non tiene niente piu' di due ore.
-   Ha regole sue (regole: qui sotto, il resto lo prende da REGOLE): stop piu'
-   vicino, pareggio presto, un solo obiettivo corto. Entra, guadagna, esce. */
+/* Il RAPIDO e' il mordi e fuggi, ma con una ragione: compra la discesa
+   dentro una salita (e vende il rimbalzo dentro una discesa). Non usa il
+   punteggio: misurato su sei anni di indici veri a 15 minuti, il momento
+   corto li' non ha vantaggio, anzi gli indici tornano indietro. Quello che
+   ha retto anche sugli anni di verifica e' il ritracciamento nel trend (vedi
+   ritraccio, piu' sotto). Stop a 1.2 ATR, tutto incassato a +1R, al massimo
+   un'ora (4 candele), fuori prima di sera; niente pareggio e niente stop che
+   insegue (pareggioDa e tp1 a 99 li spengono): su un colpo cosi' corto
+   costano piu' di quello che salvano. */
 var STILI = {
   swing:    { nome: 'Swing', segnale: 'DAY', tempo: 'HOUR', candele: 1000, candeleVive: 400, candeleTempo: 300,
               barMs: 86400000, maxBarre: 20, orizzonte: 5, unita: 'giorni' },
   intraday: { nome: 'Intraday', segnale: 'HOUR', tempo: 'MINUTE_15', candele: 1000, candeleVive: 400, candeleTempo: 300,
               barMs: 3600000, maxBarre: 7, orizzonte: 6, unita: 'ore', chiudiASera: true },
   rapido:   { nome: 'Rapido', segnale: 'MINUTE_15', tempo: 'MINUTE_5', candele: 1000, candeleVive: 400, candeleTempo: 300,
-              barMs: 900000, maxBarre: 8, orizzonte: 8, unita: 'quarti d\'ora', chiudiASera: true,
-              regole: { stopAtr: 1.2, tp1: 0.8, tp2: 1.5, trailAtr: 1.0, pareggioDa: 0.6 } }
+              barMs: 900000, maxBarre: 4, orizzonte: 4, unita: 'quarti d\'ora', chiudiASera: true, ritraccio: true,
+              regole: { stopAtr: 1.2, tp1: 99, tp2: 1.0, trailAtr: 1.0, pareggioDa: 99 } }
 };
 
 /* Le regole d'uscita. Una sola tabella, usata dal piano, dal consiglio e dal
@@ -594,6 +639,7 @@ function analizza(cs, ct, opz) {
     variazione20: t >= 20 ? u.c / cs[t - 20].c - 1 : null
   };
   an.tempismo = tempismo(an, ct, opz.prezzo);
+  an.ritraccio = ritraccio(ser, t, opz.prezzo && finito(opz.prezzo.bid) && finito(opz.prezzo.ask) ? opz.prezzo.ask - opz.prezzo.bid : NaN);
   return an;
 }
 
@@ -846,12 +892,13 @@ function consiglio(inp) {
   if ((uscita - stopEff) * dir <= 0) {
     decidi('esci', 'Il prezzo e\' oltre lo stop (' + fmtPrezzo(stopEff) + '). Se Capital.com non ti ha gia\' chiuso, chiudi tu.');
   }
-  /* 2. il segnale girato */
-  if (conDir != null && conDir <= -SOGLIA_GIRO) {
+  /* 2. il segnale girato (non nel Rapido: entra apposta contro lo strappo,
+     il punteggio corto all'entrata e' contro per costruzione) */
+  if (!stile.ritraccio && conDir != null && conDir <= -SOGLIA_GIRO) {
     decidi('esci', 'Il segnale si e\' girato contro di te: punteggio ' + segno(punti) + '. La ragione per cui eri dentro non c\'e\' piu\'.');
   }
   /* 3. la candela di crollo sulla scala corta */
-  if (inp.ct && inp.ct.length > 20 && rOra < 0) {
+  if (!stile.ritraccio && inp.ct && inp.ct.length > 20 && rOra < 0) {
     var kc = colonne(inp.ct), ac = atr(kc.h, kc.l, kc.c, 14), u = kc.n - 1;
     var corpo = (kc.c[u] - kc.o[u]) * dir;
     if (finito(ac[u]) && corpo < -2.5 * ac[u]) {
@@ -968,12 +1015,23 @@ function robotEntrata(inp) {
   var stile = STILI[inp.stile] ? inp.stile : 'swing';
   var no = function (m) { return { apri: false, motivo: m }; };
   if (!an || !an.ok) return no((an && an.motivo) || 'nessuna analisi');
-  if (!pronto(an, ROBOT.profilo)) return no('nessun segnale (' + segno(an.punti) + ', serve almeno ' + sogliaProfilo(ROBOT.profilo) + ')');
-  if (!p || !(p.R > 0) || !(p.entrata > 0)) return no('piano non calcolabile');
-  if (p.tipo !== 'mercato') return no(p.tipo === 'limite' ? 'segnale ' + an.grado + ' ma prezzo scappato: aspetta che torni' : 'segnale ' + an.grado + ' a un passo dalla rottura: aspetta che rompa');
+  var dir = an.dir, grado = an.grado;
+  if (STILI[stile].ritraccio) {
+    /* il Rapido: il segnale e' il ritracciamento nel trend, non il punteggio */
+    var rq = an.ritraccio;
+    if (!rq || !rq.dir) return no((rq && rq.motivo) || 'nessun ritracciamento');
+    if (!(rq.spreadAtr <= RITRACCIO.spreadMax)) return no('spread troppo caro: ' + Math.round(rq.spreadAtr * 100) + '% del movimento tipico (massimo ' + Math.round(RITRACCIO.spreadMax * 100) + '%)');
+    if (!p || !(p.R > 0) || !(p.entrata > 0)) return no('piano non calcolabile');
+    if (p.dir !== rq.dir) return no('piano nel verso sbagliato');
+    dir = rq.dir; grado = 'A';
+  } else {
+    if (!pronto(an, ROBOT.profilo)) return no('nessun segnale (' + segno(an.punti) + ', serve almeno ' + sogliaProfilo(ROBOT.profilo) + ')');
+    if (!p || !(p.R > 0) || !(p.entrata > 0)) return no('piano non calcolabile');
+    if (p.tipo !== 'mercato') return no(p.tipo === 'limite' ? 'segnale ' + an.grado + ' ma prezzo scappato: aspetta che torni' : 'segnale ' + an.grado + ' a un passo dalla rottura: aspetta che rompa');
+  }
   if (inp.giaDentro) return no('gia\' dentro su questo mercato');
   var rec = inp.chiusaDiRecente;
-  if (rec && rec.dir === an.dir && ora - rec.quando < ROBOT.pausaDopoChiusura[stile]) return no('chiusa da poco nella stessa direzione');
+  if (rec && rec.dir === dir && ora - rec.quando < ROBOT.pausaDopoChiusura[stile]) return no('chiusa da poco nella stessa direzione');
   if ((st.aperte || 0) >= (st.maxPosizioni || 10)) return no('posti pieni');
   if (inp.orario) {
     if (!inp.orario.aperto) return no('mercato chiuso');
@@ -982,7 +1040,7 @@ function robotEntrata(inp) {
   var passo = p.passo > 0 ? p.passo : 0.01, dimMin = p.dimMin > 0 ? p.dimMin : 0;
   var cambio = p.cambio > 0 ? p.cambio : 1, tetto = +st.tetto > 0 ? +st.tetto : 0;
   var rischioUnita = p.R * cambio, margineUnita = p.entrata * cambio / (p.leva > 0 ? p.leva : 1);
-  var voluto = rischioRobot(tetto, an.grado);
+  var voluto = rischioRobot(tetto, grado);
   var dim = giuAlPasso(voluto / rischioUnita, passo);
   if (!(dim > 0) || dim < dimMin) {
     /* sotto la taglia minima: la minima va bene finche' rischia al massimo meta' del tetto */
@@ -995,8 +1053,8 @@ function robotEntrata(inp) {
   var usabile = (st.disponibile || 0) * ROBOT.margineUsabile;
   if (dim * margineUnita > usabile) dim = giuAlPasso(Math.max(0, usabile) / margineUnita, passo);
   if (!(dim > 0) || dim < dimMin) return no('margine finito sul conto (servono ' + fmtNum(Math.max(dimMin, passo) * margineUnita, 2) + ', liberi ' + fmtNum(usabile, 2) + ')');
-  return { apri: true, dim: dim, dir: an.dir, stop: p.stop, tp: p.tp2, R: p.R, entrata: p.entrata,
-           rischio: dim * rischioUnita, margine: dim * margineUnita, motivo: p.motivoTempo || '' };
+  return { apri: true, dim: dim, dir: dir, stop: p.stop, tp: p.tp2, R: p.R, entrata: p.entrata,
+           rischio: dim * rischioUnita, margine: dim * margineUnita, motivo: STILI[stile].ritraccio ? an.ritraccio.motivo : (p.motivoTempo || '') };
 }
 
 /* Su una posizione del robot: chiudere, spostare lo stop su Capital.com, o
@@ -1036,9 +1094,54 @@ function barraMs(cs) {
 
    Una posizione alla volta per mercato. Il risultato e' in R: +1R vuol dire
    aver guadagnato quanto si rischiava. */
+/* Il backtest del Rapido: le regole di ritraccio, candela per candela, con
+   gli stessi costi di sempre. Come il robot: niente entrata a meno di 45
+   minuti (3 candele) dalla fine della seduta, ne' su un segnale rimasto
+   dall'altra parte di un buco. Una posizione alla volta per mercato. */
+function backtestRitraccio(cs, opz, stile, RG) {
+  var ser = opz.ser || indicatori(cs, opz.rif || null);
+  var k = ser.k, n = k.n, senzaCosti = !!opz.senzaCosti;
+  var inizio = Math.max(CALDO, RITRACCIO.pendenza, opz.da || 0), colpi = [], t, q;
+  for (t = inizio; t < n - 1; t++) {
+    var rq = ritraccio(ser, t);
+    if (!rq.dir || !(rq.spreadAtr <= RITRACCIO.spreadMax)) continue;
+    var vicinoChiusura = false;
+    for (q = t + 1; q <= t + 3; q++) {
+      if (q >= n || k.t[q] - k.t[q - 1] !== stile.barMs || Math.floor(k.t[q] / 86400000) !== Math.floor(k.t[t] / 86400000)) { vicinoChiusura = true; break; }
+    }
+    if (vicinoChiusura) continue;
+    var dir = rq.dir, at = ser.atr[t];
+    var entrata = k.o[t + 1] + dir * (senzaCosti ? 0 : k.s[t + 1] / 2);
+    var R = RG.stopAtr * at, stop = entrata - dir * R, tp = entrata + dir * RG.tp2 * R;
+    var j, esito = null, uscita = null;
+    for (j = t + 1; j < n; j++) {
+      var ms = senzaCosti ? 0 : k.s[j] / 2;
+      var oE = k.o[j] - dir * ms, hE = k.h[j] - dir * ms, lE = k.l[j] - dir * ms, cE = k.c[j] - dir * ms;
+      var fav = dir > 0 ? hE : lE, contr = dir > 0 ? lE : hE;
+      if ((oE - stop) * dir <= 0) { esito = 'stop'; uscita = oE; break; }
+      if ((contr - stop) * dir <= 0) {
+        var slip = senzaCosti ? 0 : RG.slittamentoAtr * (finito(ser.atr[j]) ? ser.atr[j] : 0);
+        esito = 'stop'; uscita = dir > 0 ? Math.max(stop - slip, lE) : Math.min(stop + slip, hE); break;
+      }
+      if ((fav - tp) * dir >= 0) { esito = 'tp2'; uscita = (oE - tp) * dir >= 0 ? oE : tp; break; }
+      if (j - t >= stile.maxBarre) { esito = 'tempo'; uscita = cE; break; }
+      if (stile.chiudiASera && (j + 1 >= n || Math.floor(k.t[j + 1] / 86400000) !== Math.floor(k.t[j] / 86400000))) {
+        if (j + 1 >= n) break;
+        esito = 'sera'; uscita = cE; break;
+      }
+    }
+    if (!esito) break;
+    colpi.push({ t: k.t[t + 1], dir: dir, punti: NaN, grado: 'A', r: (uscita - entrata) * dir / R, esito: esito, barre: j - t, tp1: esito === 'tp2',
+                 iEntrata: t + 1, iUscita: j, tUscita: k.t[j], entrata: entrata, uscita: uscita });
+    t = j - 1;
+  }
+  return { colpi: colpi, punti: vuoto(n), ser: ser };
+}
+
 function backtest(cs, opz) {
   opz = opz || {};
   var stile = STILI[opz.stile] || STILI.swing, RG = regoleDi(stile);
+  if (stile.ritraccio) return backtestRitraccio(cs, opz, stile, RG);
   var ser = opz.ser || indicatori(cs, opz.rif || null);
   var k = ser.k, n = k.n;
   var soglia = finito(opz.soglia) ? opz.soglia : 40;
@@ -1250,7 +1353,7 @@ var API = {
   analizza: analizza, tempismo: tempismo, piano: piano, ripartisci: ripartisci, consiglio: consiglio,
   pronto: pronto, sogliaProfilo: sogliaProfilo, strumentoDa: strumentoDa, notteDa: notteDa,
   robotEntrata: robotEntrata, robotUscita: robotUscita, rischioRobot: rischioRobot, ROBOT: ROBOT,
-  regoleDi: regoleDi, riferimentoLeggero: riferimentoLeggero,
+  regoleDi: regoleDi, riferimentoLeggero: riferimentoLeggero, ritraccio: ritraccio, RITRACCIO: RITRACCIO,
   backtest: backtest, riassumi: riassumi, calibra: calibra, portafoglio: portafoglio,
   derive: derive, calibraDerive: calibraDerive, previsione: previsione,
   orari: orari, barraMs: barraMs, giuAlPasso: giuAlPasso, rischioIniziale: rischioIniziale,
@@ -2264,14 +2367,27 @@ async function entrataRobot(env, ctx, robot, epic, lista, conto, perdita, rifEpi
   const folle = await follaDi(env, ctx, [epic]);
   const prezzo = sn.bid > 0 && sn.offer > 0 ? { bid: sn.bid, ask: sn.offer } : null;
   const an = M.analizza(cs, ct, { ser: serDi(ctx, cs, rif), rif, percLunghi: folle[epic], prezzo });
-  if (!M.pronto(an, M.ROBOT.profilo)) return { epic, punti: an.ok ? an.punti : null, motivo: an.ok ? 'nessun segnale' : an.motivo };
+  /* il Rapido entra sul ritracciamento nel trend, gli altri sul punteggio.
+     Il segnale del Rapido si legge sull'ultima candela CHIUSA, come nella
+     misura sui dati veri: quella di adesso e' ancora a meta'. */
+  const rapido = !!S.ritraccio;
+  let rq = null;
+  if (an.ok && rapido) {
+    const tc = cs[cs.length - 1].t + S.barMs <= ora ? an.t : an.t - 1;
+    rq = M.ritraccio(an.ser, tc, prezzo ? prezzo.ask - prezzo.bid : NaN);
+    an.ritraccio = rq;
+    if (Number.isFinite(an.ser.atr[tc]) && an.ser.atr[tc] > 0) an.atr = an.ser.atr[tc];
+  }
+  if (rapido && !(rq && rq.dir)) return { epic, punti: an.ok ? an.punti : null, motivo: an.ok ? rq.motivo : an.motivo };
+  if (!rapido && !M.pronto(an, M.ROBOT.profilo)) return { epic, punti: an.ok ? an.punti : null, motivo: an.ok ? 'nessun segnale' : an.motivo };
 
   let leve = null;
   try { leve = (await leggi(env, 'accounts/preferences', new URLSearchParams())).leverages || null; } catch (e) { leve = null; }
   const strumento = M.strumentoDa(d, leve);
   const cambio = await cambioVerso(env, strumento.valuta, conto.valuta);
   const p = M.piano({ an, budget: robot.perditaMax, profilo: M.ROBOT.profilo, stile, strumento, cambio,
-                      notte: M.notteDa(d.instrument && d.instrument.overnightFee) || undefined });
+                      notte: M.notteDa(d.instrument && d.instrument.overnightFee) || undefined,
+                      ...(rapido ? { dir: rq.dir, tempismo: { tipo: 'mercato', livello: rq.dir > 0 ? sn.offer : sn.bid, motivo: rq.motivo } } : {}) });
   /* il rischio gia' in gioco: per ogni sua posizione, quanto si perde ancora
      DA ADESSO se scatta lo stop che c'e' su Capital.com. Il tetto si misura
      sul patrimonio, che il risultato aperto lo contiene gia': una posizione

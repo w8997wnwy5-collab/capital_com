@@ -326,9 +326,16 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
   prova('robot: chiusa da poco nella stessa direzione non riapre', !e({ chiusaDiRecente: { dir: 1, quando: ora - 3600000 } }).apri &&
         e({ chiusaDiRecente: { dir: -1, quando: ora - 3600000 } }).apri && e({ chiusaDiRecente: { dir: 1, quando: ora - 30 * 3600000 } }).apri);
   var orarioAperto = { aperto: true, chiude: ora + 3 * 3600000 };
-  prova('robot: in rapido rientra dopo un quarto d\'ora (entra, incassa, rientra)',
-        !e({ stile: 'rapido', orario: orarioAperto, chiusaDiRecente: { dir: 1, quando: ora - 10 * 60000 } }).apri &&
-        e({ stile: 'rapido', orario: orarioAperto, chiusaDiRecente: { dir: 1, quando: ora - 16 * 60000 } }).apri);
+  /* il Rapido: entra sul ritracciamento nel trend, non sul punteggio */
+  var anR = { ok: true, dir: -1, grado: '', punti: -20, ritraccio: { dir: 1, trend: 1, distanza: -2.3, spreadAtr: 0.05, motivo: 'Discesa di 2.3 ATR dentro un trend su' } };
+  function eR(x) { return e(Object.assign({ an: anR, stile: 'rapido', orario: orarioAperto, piano: piano({ dir: 1 }) }, x || {})); }
+  var rap = eR();
+  prova('rapido: entra sul ritracciamento nel trend, anche se il punteggio corto e\' contro', rap.apri && rap.dir === 1 && /Discesa/.test(rap.motivo), JSON.stringify(rap));
+  prova('rapido: senza ritracciamento non entra, e dice perche\'', !eR({ an: Object.assign({}, anR, { ritraccio: { dir: 0, motivo: 'trend su, aspetta una discesa: 1.2 ATR su 2' } }) }).apri &&
+        /aspetta una discesa/.test(eR({ an: Object.assign({}, anR, { ritraccio: { dir: 0, motivo: 'trend su, aspetta una discesa: 1.2 ATR su 2' } }) }).motivo));
+  prova('rapido: spread troppo caro rispetto al movimento, non entra', /spread troppo caro/.test(eR({ an: Object.assign({}, anR, { ritraccio: Object.assign({}, anR.ritraccio, { spreadAtr: 0.2 }) }) }).motivo));
+  prova('rapido: rientra dopo un quarto d\'ora (entra, incassa, rientra)',
+        !eR({ chiusaDiRecente: { dir: 1, quando: ora - 10 * 60000 } }).apri && eR({ chiusaDiRecente: { dir: 1, quando: ora - 16 * 60000 } }).apri);
   var stretto = e({ stato: Object.assign({}, stato, { residuo: 12, rischioAperto: 10 }) });
   prova('robot: il tetto di perdita taglia la taglia (restano 2 CHF: 0.8 unita\')', stretto.apri && stretto.dim === 0.8 && stretto.rischio <= 2 + 1e-9,
         JSON.stringify(stretto));
@@ -375,7 +382,13 @@ var rw = passeggiata(600, 7, 0.02, 0.001), K = M.colonne(rw);
   prova('backtest del rapido: passeggiata a caso compatibile con zero', Math.abs(rq.tStat) < 2.6 && rq.n > 500,
         'colpi ' + rq.n + ', R medio ' + rq.rMedio.toFixed(4) + ', t ' + rq.tStat.toFixed(2));
   var Rr = M.regoleDi('rapido');
-  prova('rapido: obiettivo corto, uscita in due ore', Rr.tp2 === 1.5 && Rr.stopAtr === 1.2 && Rr.slittamentoAtr === M.REGOLE.slittamentoAtr &&
+  /* il consiglio del Rapido non esce sul punteggio girato: entra apposta contro lo strappo */
+  var cr = M.consiglio({ pos: { dir: 1, entrata: 100, dim: 1, aperta: Date.UTC(2026, 9, 7, 15, 0), R: 1 }, prezzo: { bid: 99.9, ask: 100 },
+                         an: { ok: true, punti: -60, atr: 1, prezzo: 99.95 }, stile: 'rapido', ora: Date.UTC(2026, 9, 7, 15, 20) });
+  var cs2 = M.consiglio({ pos: { dir: 1, entrata: 100, dim: 1, aperta: Date.UTC(2026, 9, 7, 15, 0), R: 1 }, prezzo: { bid: 99.9, ask: 100 },
+                          an: { ok: true, punti: -60, atr: 1, prezzo: 99.95 }, stile: 'swing', ora: Date.UTC(2026, 9, 7, 15, 20) });
+  prova('rapido: il punteggio contro non fa uscire (lo swing si\')', cr.verdetto !== 'esci' && cs2.verdetto === 'esci', cr.verdetto + ' / ' + cs2.verdetto);
+  prova('rapido: obiettivo a +1R, uscita in un\'ora', Rr.tp2 === 1 && Rr.stopAtr === 1.2 && Rr.slittamentoAtr === M.REGOLE.slittamentoAtr &&
         rapidi.every(function (k) { return k.barre <= M.STILI.rapido.maxBarre; }) && M.regoleDi('swing') === M.regoleDi(M.STILI.swing) && M.regoleDi('swing').tp2 === 3.5);
   var conSlip = M.riassumi(M.backtest(passeggiata(900, 77, 0.02, 0.0005), { soglia: 28 }).colpi);
   var senzaSlip = M.riassumi(M.backtest(passeggiata(900, 77, 0.02, 0.0005), { soglia: 28, senzaCosti: true }).colpi);

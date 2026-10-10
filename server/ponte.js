@@ -997,14 +997,27 @@ async function entrataRobot(env, ctx, robot, epic, lista, conto, perdita, rifEpi
   const folle = await follaDi(env, ctx, [epic]);
   const prezzo = sn.bid > 0 && sn.offer > 0 ? { bid: sn.bid, ask: sn.offer } : null;
   const an = M.analizza(cs, ct, { ser: serDi(ctx, cs, rif), rif, percLunghi: folle[epic], prezzo });
-  if (!M.pronto(an, M.ROBOT.profilo)) return { epic, punti: an.ok ? an.punti : null, motivo: an.ok ? 'nessun segnale' : an.motivo };
+  /* il Rapido entra sul ritracciamento nel trend, gli altri sul punteggio.
+     Il segnale del Rapido si legge sull'ultima candela CHIUSA, come nella
+     misura sui dati veri: quella di adesso e' ancora a meta'. */
+  const rapido = !!S.ritraccio;
+  let rq = null;
+  if (an.ok && rapido) {
+    const tc = cs[cs.length - 1].t + S.barMs <= ora ? an.t : an.t - 1;
+    rq = M.ritraccio(an.ser, tc, prezzo ? prezzo.ask - prezzo.bid : NaN);
+    an.ritraccio = rq;
+    if (Number.isFinite(an.ser.atr[tc]) && an.ser.atr[tc] > 0) an.atr = an.ser.atr[tc];
+  }
+  if (rapido && !(rq && rq.dir)) return { epic, punti: an.ok ? an.punti : null, motivo: an.ok ? rq.motivo : an.motivo };
+  if (!rapido && !M.pronto(an, M.ROBOT.profilo)) return { epic, punti: an.ok ? an.punti : null, motivo: an.ok ? 'nessun segnale' : an.motivo };
 
   let leve = null;
   try { leve = (await leggi(env, 'accounts/preferences', new URLSearchParams())).leverages || null; } catch (e) { leve = null; }
   const strumento = M.strumentoDa(d, leve);
   const cambio = await cambioVerso(env, strumento.valuta, conto.valuta);
   const p = M.piano({ an, budget: robot.perditaMax, profilo: M.ROBOT.profilo, stile, strumento, cambio,
-                      notte: M.notteDa(d.instrument && d.instrument.overnightFee) || undefined });
+                      notte: M.notteDa(d.instrument && d.instrument.overnightFee) || undefined,
+                      ...(rapido ? { dir: rq.dir, tempismo: { tipo: 'mercato', livello: rq.dir > 0 ? sn.offer : sn.bid, motivo: rq.motivo } } : {}) });
   /* il rischio gia' in gioco: per ogni sua posizione, quanto si perde ancora
      DA ADESSO se scatta lo stop che c'e' su Capital.com. Il tetto si misura
      sul patrimonio, che il risultato aperto lo contiene gia': una posizione
